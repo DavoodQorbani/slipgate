@@ -1,10 +1,10 @@
 # SlipGate
 
-Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, Slipstream) and HTTPS proxies (NaiveProxy) with systemd services, multi-tunnel DNS routing, and user management. Designed for use with the [SlipNet](https://github.com/anonvector/SlipNet) Android VPN app.
+Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, NoizDNS, Slipstream) and HTTPS proxies (NaiveProxy) with systemd services, multi-tunnel DNS routing, and user management. Designed for use with the [SlipNet](https://github.com/anonvector/SlipNet) Android VPN app.
 
 ## Features
 
-- **Multi-transport**: DNSTT (DNS-over-TCP tunnel), Slipstream (QUIC-based DNS), NaiveProxy (HTTPS with Caddy)
+- **Multi-transport**: DNSTT/NoizDNS (DNS tunnels with Curve25519 encryption), Slipstream (QUIC-based DNS), NaiveProxy (HTTPS with Caddy)
 - **Dual backend**: SOCKS5 proxy (microsocks) or SSH forwarding
 - **DNS routing**: Single-tunnel or multi-tunnel mode with domain-based dispatch
 - **User management**: Managed SSH + SOCKS credentials per user
@@ -114,9 +114,9 @@ If any required flag is omitted, slipgate falls back to an interactive prompt fo
 │  └──┬──────────┬────────┘          └──────────┬────────────┘   │
 │     │          │                              │               │
 │     v          v                              │               │
-│  ┌──────┐  ┌───────────┐                     │               │
-│  │DNSTT │  │Slipstream │                     │               │
-│  └──┬───┘  └─────┬─────┘                     │               │
+│  ┌────────────┐  ┌───────────┐                │               │
+│  │DNSTT/NoizDNS│  │Slipstream │                │               │
+│  └──────┬─────┘  └─────┬─────┘                │               │
 │     │            │                            │               │
 │     v            v                            v               │
 │  ┌────────────────────────────────────────────────────────┐   │
@@ -133,7 +133,7 @@ If any required flag is omitted, slipgate falls back to an interactive prompt fo
 
 | Transport | Protocol | Port | Description |
 |-----------|----------|------|-------------|
-| **DNSTT** | DNS-over-TCP | 53/udp | Curve25519 encrypted DNS tunnel. Supports DNSTT and NoizDNS clients |
+| **DNSTT/NoizDNS** | DNS | 53/udp | Curve25519 encrypted DNS tunnel. A single server serves both DNSTT and NoizDNS clients. NoizDNS adds DPI evasion with base36/hex encoding and CDN prefix stripping |
 | **Slipstream** | QUIC DNS | 53/udp | QUIC-based tunnel with certificate authentication |
 | **NaiveProxy** | HTTPS | 443/tcp | Caddy with forwardproxy plugin. Auto-TLS via Let's Encrypt. Probe-resistant with decoy site |
 
@@ -150,7 +150,7 @@ After creating a tunnel, generate a shareable config:
 sudo slipgate tunnel share mytunnel
 ```
 
-This outputs a `slipnet://` URI that can be scanned or imported into the SlipNet Android app.
+This outputs a `slipnet://` URI that can be scanned or imported into the SlipNet Android app. For DNSTT tunnels, you'll be asked to choose between a DNSTT or NoizDNS client profile — both connect to the same server, but NoizDNS profiles enable DPI evasion on the client side.
 
 ## File Locations
 
