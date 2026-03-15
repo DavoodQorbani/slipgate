@@ -24,11 +24,22 @@ func String(label, defaultVal string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	line = strings.TrimSpace(line)
+	line = sanitize(strings.TrimSpace(line))
 	if line == "" {
 		return defaultVal, nil
 	}
 	return line, nil
+}
+
+// sanitize strips non-printable and non-ASCII bytes from input.
+func sanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= 0x20 && r < 0x7F {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Select asks user to choose from a list.

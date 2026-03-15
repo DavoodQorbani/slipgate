@@ -65,9 +65,9 @@ func (c *Config) ValidateNewTunnel(t *TunnelConfig) error {
 	}
 	c.mu.RLock()
 	for _, existing := range c.Tunnels {
-		if existing.Domain == t.Domain {
+		if existing.Domain == t.Domain && existing.Backend == t.Backend {
 			c.mu.RUnlock()
-			return fmt.Errorf("domain %q already in use by tunnel %q", t.Domain, existing.Tag)
+			return fmt.Errorf("domain %q with backend %q already in use by tunnel %q", t.Domain, t.Backend, existing.Tag)
 		}
 	}
 	c.mu.RUnlock()
