@@ -11,11 +11,11 @@ import (
 	"github.com/anonvector/slipgate/internal/certs"
 	"github.com/anonvector/slipgate/internal/clientcfg"
 	"github.com/anonvector/slipgate/internal/config"
+	"github.com/anonvector/slipgate/internal/dnsrouter"
 	"github.com/anonvector/slipgate/internal/keys"
 	"github.com/anonvector/slipgate/internal/network"
 	"github.com/anonvector/slipgate/internal/prompt"
 	"github.com/anonvector/slipgate/internal/proxy"
-	"github.com/anonvector/slipgate/internal/router"
 	"github.com/anonvector/slipgate/internal/system"
 	"github.com/anonvector/slipgate/internal/transport"
 )
@@ -274,16 +274,43 @@ func handleSystemInstall(ctx *actions.Context) error {
 		return actions.NewError(actions.SystemInstall, "failed to save config", err)
 	}
 
+	// Count DNS tunnels to decide routing mode
+	dnsTunnelCount := 0
+	for _, t := range allTunnels {
+		if t.IsDNSTunnel() {
+			dnsTunnelCount++
+		}
+	}
+
+	// Auto-switch to multi mode when multiple DNS tunnels exist
+	if dnsTunnelCount > 1 {
+		cfg.Route.Mode = "multi"
+		if err := cfg.Save(); err != nil {
+			return actions.NewError(actions.SystemInstall, "failed to save config", err)
+		}
+	}
+
 	// Create and start systemd services
 	for i := range allTunnels {
 		out.Info(fmt.Sprintf("Creating service for %q...", allTunnels[i].Tag))
 		if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
 			return actions.NewError(actions.SystemInstall, fmt.Sprintf("failed to create service for %s", allTunnels[i].Tag), err)
 		}
-		if err := router.AddTunnel(cfg, &allTunnels[i]); err != nil {
-			out.Warning(fmt.Sprintf("Failed to register %s with router: %s", allTunnels[i].Tag, err.Error()))
-		}
 		out.Success(fmt.Sprintf("Tunnel %q started", allTunnels[i].Tag))
+	}
+
+	// Start DNS router if multi mode, or ensure single tunnel works
+	if dnsTunnelCount > 0 {
+		if cfg.Route.Mode == "multi" {
+			out.Info("Starting DNS router (multi-tunnel mode)...")
+			if err := dnsrouter.CreateRouterService(); err != nil {
+				out.Warning("Failed to create DNS router service: " + err.Error())
+			} else if err := dnsrouter.StartRouterService(); err != nil {
+				out.Warning("Failed to start DNS router: " + err.Error())
+			} else {
+				out.Success("DNS router started on 0.0.0.0:53")
+			}
+		}
 	}
 
 	if setupMicrosocks {
