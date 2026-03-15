@@ -168,5 +168,9 @@ func groupExists(name string) bool {
 
 func run(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %v: %w (%s)", name, args, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
