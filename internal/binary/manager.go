@@ -41,7 +41,10 @@ func EnsureInstalled(name string) error {
 	}
 
 	url := fmt.Sprintf(urlTemplate, runtime.GOOS, runtime.GOARCH)
-	return downloadTo(url, binPath, 0755)
+	if err := downloadTo(url, binPath, 0755); err != nil {
+		return fmt.Errorf("download %s from %s: %w", name, url, err)
+	}
+	return nil
 }
 
 // CheckUpdate checks GitHub releases for a newer version.
