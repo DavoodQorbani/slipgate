@@ -43,16 +43,17 @@ func (r *Router) AddRoute(domain, backend string) {
 	r.routes[strings.ToLower(domain)] = backend
 }
 
-// AddVerifyRoute registers a domain's public key for HMAC verification.
-// When the router receives an nzv.<nonce>.<domain> TXT query, it responds
-// with HMAC-SHA256(pubkey, nonce) instead of forwarding.
-func (r *Router) AddVerifyRoute(domain string, pubkey []byte) {
+// AddVerifyRoute registers a domain's public key and MTU for HMAC verification.
+// When the router receives a _ck.<nonce>.<domain> TXT query, it responds
+// with HMAC-SHA256(pubkey, nonce) and the MTU value.
+func (r *Router) AddVerifyRoute(domain string, pubkey []byte, mtu int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	r.verifyRoutes = append(r.verifyRoutes, verifyRoute{
 		domainLabels: strings.Split(domain, "."),
 		pubkey:       pubkey,
+		mtu:          mtu,
 	})
 }
 
@@ -199,8 +200,12 @@ func Serve(cfgInterface interface{}) error {
 					log.Printf("verify: skip %s: %v", tunnel.Tag, err)
 					continue
 				}
-				r.AddVerifyRoute(tunnel.Domain, pubkey)
-				log.Printf("verify: %s (HMAC via pubkey)", tunnel.Domain)
+				mtu := tunnel.DNSTT.MTU
+				if mtu == 0 {
+					mtu = config.DefaultMTU
+				}
+				r.AddVerifyRoute(tunnel.Domain, pubkey, mtu)
+				log.Printf("verify: %s (HMAC via pubkey, mtu=%d)", tunnel.Domain, mtu)
 			}
 		case config.TransportSlipstream:
 			if tunnel.Slipstream != nil && tunnel.Slipstream.Cert != "" {
@@ -209,7 +214,7 @@ func Serve(cfgInterface interface{}) error {
 					log.Printf("verify: skip %s: %v", tunnel.Tag, err)
 					continue
 				}
-				r.AddVerifyRoute(tunnel.Domain, hmacKey)
+				r.AddVerifyRoute(tunnel.Domain, hmacKey, 0)
 				log.Printf("verify: %s (HMAC via cert fingerprint)", tunnel.Domain)
 			}
 		}
