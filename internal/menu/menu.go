@@ -62,6 +62,8 @@ func Run(cfg *config.Config, cfgErr error) error {
 		case "uninstall":
 			if err := runAction(actions.SystemUninstall, cfg); err != nil {
 				printError(err)
+			} else {
+				return nil
 			}
 		case "quit":
 			fmt.Println("  Bye!")
