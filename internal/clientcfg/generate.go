@@ -100,6 +100,12 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 		fields[FSSHHost] = getServerIP()
 	}
 
+	// NaiveProxy requires naiveUsername/naivePassword (fields 29/30)
+	if tunnel.Transport == config.TransportNaive && username != "" {
+		fields[FNaiveUser] = username
+		fields[FNaivePass] = b64(password)
+	}
+
 	return Encode(fields), nil
 }
 
