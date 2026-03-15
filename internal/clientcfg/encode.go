@@ -7,21 +7,28 @@ import (
 
 const uriScheme = "slipnet://"
 
-// Encode takes v16 fields and produces a slipnet:// URI.
+// Encode takes fields and produces a slipnet:// URI.
+// Uses standard base64 (not URL-safe) with no padding wrapping, matching the app.
 func Encode(fields [TotalFields]string) string {
 	payload := strings.Join(fields[:], "|")
-	encoded := base64.URLEncoding.EncodeToString([]byte(payload))
+	// Trailing pipe to match noizdns-deploy format
+	payload += "|"
+	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
 	return uriScheme + encoded
 }
 
-// Decode parses a slipnet:// URI back into v16 fields.
+// Decode parses a slipnet:// URI back into fields.
 func Decode(uri string) ([TotalFields]string, error) {
 	var fields [TotalFields]string
 
 	encoded := strings.TrimPrefix(uri, uriScheme)
-	data, err := base64.URLEncoding.DecodeString(encoded)
+	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return fields, err
+		// Try URL-safe encoding as fallback
+		data, err = base64.URLEncoding.DecodeString(encoded)
+		if err != nil {
+			return fields, err
+		}
 	}
 
 	parts := strings.Split(string(data), "|")

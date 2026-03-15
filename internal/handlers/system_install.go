@@ -110,12 +110,12 @@ func handleSystemInstall(ctx *actions.Context) error {
 	out.Print("")
 	out.Success("Dependencies installed!")
 
-	// ── Step 5: Set up first tunnel ────────────────────────────────
+	// ── Step 5: Set up tunnels ─────────────────────────────────────
 	out.Print("")
-	out.Print("  ── First Tunnel Setup ──────────────────────────────")
+	out.Print("  ── Tunnel Setup ────────────────────────────────────")
 	out.Print("")
 
-	setupTunnel, err := prompt.ConfirmYes("Set up your first tunnel now?")
+	setupTunnel, err := prompt.ConfirmYes("Set up tunnels now?")
 	if err != nil {
 		return err
 	}
@@ -125,180 +125,180 @@ func handleSystemInstall(ctx *actions.Context) error {
 		return nil
 	}
 
-	// Pick transport — default to first installed, skip prompt
-	selectedTransport := transports[0]
-	{
-		out.Info(fmt.Sprintf("Using transport: %s (add more tunnels later with 'slipgate tunnel add')", selectedTransport))
-	}
-
-	// Backend
+	// Backend (shared across all transports)
 	backend, err := prompt.Select("Backend", actions.BackendOptions)
 	if err != nil {
 		return err
 	}
 
-	// Domain
-	domain, err := prompt.String("Domain (e.g. t.example.com)", "")
-	if err != nil {
-		return err
-	}
-	if domain == "" {
-		return actions.NewError(actions.SystemInstall, "domain is required", nil)
-	}
-
-	// Determine which backends to create tunnels for
 	backends := []string{backend}
 	if backend == "both" {
 		backends = []string{config.BackendSOCKS, config.BackendSSH}
 	}
 
-	var tunnels []config.TunnelConfig
+	var allTunnels []config.TunnelConfig
+	setupMicrosocks := false
 
-	for i, b := range backends {
-		tag := "tunnel1"
-		if backend == "both" {
-			if b == config.BackendSOCKS {
-				tag = "socks"
-			} else {
-				tag = "ssh"
+	// Walk through each installed transport
+	for tIdx, selectedTransport := range transports {
+		out.Print("")
+		out.Print(fmt.Sprintf("  ── %s ──", selectedTransport))
+
+		// Ask for domain
+		domainHint := "t.example.com"
+		if selectedTransport == config.TransportNaive {
+			domainHint = "example.com"
+		} else if selectedTransport == config.TransportSlipstream {
+			domainHint = "s.example.com"
+		}
+		domain, err := prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", selectedTransport, domainHint), "")
+		if err != nil {
+			return err
+		}
+		if domain == "" {
+			out.Warning(fmt.Sprintf("Skipping %s (no domain)", selectedTransport))
+			continue
+		}
+
+		// Shared state for keys/certs across socks+ssh backends of same transport
+		var sharedDNSTT *config.DNSTTConfig
+		var sharedSlipstream *config.SlipstreamConfig
+		var sharedNaive *config.NaiveConfig
+
+		for bIdx, b := range backends {
+			tag := selectedTransport
+			if backend == "both" {
+				tag = selectedTransport + "-" + b
 			}
-		}
 
-		tunnel := config.TunnelConfig{
-			Tag:       tag,
-			Transport: selectedTransport,
-			Backend:   b,
-			Domain:    domain,
-			Enabled:   true,
-		}
+			tunnel := config.TunnelConfig{
+				Tag:       tag,
+				Transport: selectedTransport,
+				Backend:   b,
+				Domain:    domain,
+				Enabled:   true,
+			}
 
-		if tunnel.IsDNSTunnel() {
-			tunnel.Port = cfg.NextAvailablePort()
-			// Avoid port collision when creating multiple tunnels
-			for _, existing := range tunnels {
-				if existing.Port == tunnel.Port {
-					tunnel.Port++
+			if tunnel.IsDNSTunnel() {
+				tunnel.Port = cfg.NextAvailablePort()
+				for _, existing := range allTunnels {
+					if existing.Port == tunnel.Port {
+						tunnel.Port++
+					}
 				}
 			}
-		}
 
-		if err := cfg.ValidateNewTunnel(&tunnel); err != nil {
-			return actions.NewError(actions.SystemInstall, "validation failed", err)
-		}
-
-		tunnelDir := config.TunnelDir(tag)
-		if err := os.MkdirAll(tunnelDir, 0750); err != nil {
-			return actions.NewError(actions.SystemInstall, "failed to create tunnel dir", err)
-		}
-
-		// Transport-specific setup — share keys/certs across both tunnels
-		switch selectedTransport {
-		case config.TransportDNSTT:
-			privKeyPath := filepath.Join(tunnelDir, "server.key")
-			pubKeyPath := filepath.Join(tunnelDir, "server.pub")
-
-			if i == 0 {
-				out.Info("Generating Curve25519 keypair...")
+			if err := cfg.ValidateNewTunnel(&tunnel); err != nil {
+				out.Warning(fmt.Sprintf("Skip %s: %v", tag, err))
+				continue
 			}
 
-			// Reuse keys from first tunnel if creating both
-			if i > 0 && len(tunnels) > 0 && tunnels[0].DNSTT != nil {
-				// Copy key files from first tunnel
-				srcDir := config.TunnelDir(tunnels[0].Tag)
-				copyFile(filepath.Join(srcDir, "server.key"), privKeyPath)
-				copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath)
+			tunnelDir := config.TunnelDir(tag)
+			if err := os.MkdirAll(tunnelDir, 0750); err != nil {
+				return actions.NewError(actions.SystemInstall, "failed to create tunnel dir", err)
+			}
+
+			switch selectedTransport {
+			case config.TransportDNSTT:
+				privKeyPath := filepath.Join(tunnelDir, "server.key")
+				pubKeyPath := filepath.Join(tunnelDir, "server.pub")
+
+				if bIdx == 0 {
+					out.Info("Generating Curve25519 keypair...")
+					pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
+					if err != nil {
+						return actions.NewError(actions.SystemInstall, "key generation failed", err)
+					}
+					sharedDNSTT = &config.DNSTTConfig{
+						MTU:        config.DefaultMTU,
+						PrivateKey: privKeyPath,
+						PublicKey:  pubKey,
+					}
+					out.Success(fmt.Sprintf("Public key: %s", pubKey))
+				} else if sharedDNSTT != nil {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					copyFile(filepath.Join(srcDir, "server.key"), privKeyPath)
+					copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath)
+				}
 				tunnel.DNSTT = &config.DNSTTConfig{
-					MTU:        config.DefaultMTU,
+					MTU:        sharedDNSTT.MTU,
 					PrivateKey: privKeyPath,
-					PublicKey:  tunnels[0].DNSTT.PublicKey,
+					PublicKey:  sharedDNSTT.PublicKey,
 				}
-			} else {
-				pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
-				if err != nil {
-					return actions.NewError(actions.SystemInstall, "key generation failed", err)
-				}
-				tunnel.DNSTT = &config.DNSTTConfig{
-					MTU:        config.DefaultMTU,
-					PrivateKey: privKeyPath,
-					PublicKey:  pubKey,
-				}
-				out.Success(fmt.Sprintf("Public key: %s", pubKey))
-			}
 
-		case config.TransportSlipstream:
-			certPath := filepath.Join(tunnelDir, "cert.pem")
-			keyPath := filepath.Join(tunnelDir, "key.pem")
+			case config.TransportSlipstream:
+				certPath := filepath.Join(tunnelDir, "cert.pem")
+				keyPath := filepath.Join(tunnelDir, "key.pem")
 
-			if i > 0 && len(tunnels) > 0 && tunnels[0].Slipstream != nil {
-				srcDir := config.TunnelDir(tunnels[0].Tag)
-				copyFile(filepath.Join(srcDir, "cert.pem"), certPath)
-				copyFile(filepath.Join(srcDir, "key.pem"), keyPath)
-			} else {
-				out.Info("Generating self-signed certificate...")
-				if err := certs.GenerateSelfSigned(certPath, keyPath, domain); err != nil {
-					return actions.NewError(actions.SystemInstall, "cert generation failed", err)
+				if bIdx == 0 {
+					out.Info("Generating self-signed certificate...")
+					if err := certs.GenerateSelfSigned(certPath, keyPath, domain); err != nil {
+						return actions.NewError(actions.SystemInstall, "cert generation failed", err)
+					}
+					sharedSlipstream = &config.SlipstreamConfig{Cert: certPath, Key: keyPath}
+				} else if sharedSlipstream != nil {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					copyFile(filepath.Join(srcDir, "cert.pem"), certPath)
+					copyFile(filepath.Join(srcDir, "key.pem"), keyPath)
 				}
-			}
-			tunnel.Slipstream = &config.SlipstreamConfig{
-				Cert: certPath,
-				Key:  keyPath,
-			}
+				tunnel.Slipstream = &config.SlipstreamConfig{Cert: certPath, Key: keyPath}
 
-		case config.TransportNaive:
-			if i == 0 {
-				email, err := prompt.String("Email (for Let's Encrypt)", "")
-				if err != nil {
-					return err
-				}
-				decoyURL, err := prompt.String("Decoy URL", "https://www.wikipedia.org")
-				if err != nil {
-					return err
+			case config.TransportNaive:
+				if bIdx == 0 {
+					email, err := prompt.String("Email (for Let's Encrypt)", "")
+					if err != nil {
+						return err
+					}
+					decoyURL, err := prompt.String("Decoy URL", "https://www.wikipedia.org")
+					if err != nil {
+						return err
+					}
+					sharedNaive = &config.NaiveConfig{Email: email, DecoyURL: decoyURL, Port: 443}
 				}
 				tunnel.Naive = &config.NaiveConfig{
-					Email:    email,
-					DecoyURL: decoyURL,
-					Port:     443,
-				}
-			} else if len(tunnels) > 0 && tunnels[0].Naive != nil {
-				tunnel.Naive = &config.NaiveConfig{
-					Email:    tunnels[0].Naive.Email,
-					DecoyURL: tunnels[0].Naive.DecoyURL,
+					Email:    sharedNaive.Email,
+					DecoyURL: sharedNaive.DecoyURL,
 					Port:     443,
 				}
 			}
-		}
 
-		cfg.AddTunnel(tunnel)
-		tunnels = append(tunnels, tunnel)
+			cfg.AddTunnel(tunnel)
+			allTunnels = append(allTunnels, tunnel)
+
+			if b == config.BackendSOCKS && selectedTransport != config.TransportNaive {
+				setupMicrosocks = true
+			}
+
+			_ = tIdx // used in loop
+		}
 	}
 
-	cfg.Route.Active = tunnels[0].Tag
-	cfg.Route.Default = tunnels[0].Tag
+	if len(allTunnels) == 0 {
+		out.Warning("No tunnels created.")
+		return nil
+	}
+
+	cfg.Route.Active = allTunnels[0].Tag
+	cfg.Route.Default = allTunnels[0].Tag
 	if err := cfg.Save(); err != nil {
 		return actions.NewError(actions.SystemInstall, "failed to save config", err)
 	}
 
 	// Create and start systemd services
-	for i := range tunnels {
-		out.Info(fmt.Sprintf("Creating service for %q...", tunnels[i].Tag))
-		if err := transport.CreateService(&tunnels[i], cfg); err != nil {
-			return actions.NewError(actions.SystemInstall, fmt.Sprintf("failed to create service for %s", tunnels[i].Tag), err)
+	for i := range allTunnels {
+		out.Info(fmt.Sprintf("Creating service for %q...", allTunnels[i].Tag))
+		if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
+			return actions.NewError(actions.SystemInstall, fmt.Sprintf("failed to create service for %s", allTunnels[i].Tag), err)
 		}
-
-		if err := router.AddTunnel(cfg, &tunnels[i]); err != nil {
-			out.Warning(fmt.Sprintf("Failed to register %s with router: %s", tunnels[i].Tag, err.Error()))
+		if err := router.AddTunnel(cfg, &allTunnels[i]); err != nil {
+			out.Warning(fmt.Sprintf("Failed to register %s with router: %s", allTunnels[i].Tag, err.Error()))
 		}
-
-		out.Success(fmt.Sprintf("Tunnel %q started", tunnels[i].Tag))
+		out.Success(fmt.Sprintf("Tunnel %q started", allTunnels[i].Tag))
 	}
 
-	// Setup microsocks for SOCKS backend
-	for _, b := range backends {
-		if b == config.BackendSOCKS {
-			if err := proxy.SetupMicrosocks(); err != nil {
-				out.Warning("Failed to setup microsocks: " + err.Error())
-			}
-			break
+	if setupMicrosocks {
+		if err := proxy.SetupMicrosocks(); err != nil {
+			out.Warning("Failed to setup microsocks: " + err.Error())
 		}
 	}
 
@@ -347,22 +347,32 @@ func handleSystemInstall(ctx *actions.Context) error {
 	out.Print("    Installation Summary")
 	out.Print("  ══════════════════════════════════════════════════════")
 	out.Print("")
-	out.Print(fmt.Sprintf("    Transport : %s", selectedTransport))
-	out.Print(fmt.Sprintf("    Domain    : %s", domain))
+	out.Print(fmt.Sprintf("    Transports: %d installed", len(transports)))
 
-	for _, t := range tunnels {
+	for _, t := range allTunnels {
 		out.Print(fmt.Sprintf("    Tunnel    : %s (backend: %s)", t.Tag, t.Backend))
 	}
 
-	if len(tunnels) > 0 && tunnels[0].DNSTT != nil {
-		out.Print(fmt.Sprintf("    Public Key: %s", tunnels[0].DNSTT.PublicKey))
-		out.Print(fmt.Sprintf("    MTU       : %d", tunnels[0].DNSTT.MTU))
+	if len(allTunnels) > 0 && allTunnels[0].DNSTT != nil {
+		out.Print(fmt.Sprintf("    Public Key: %s", allTunnels[0].DNSTT.PublicKey))
+		out.Print(fmt.Sprintf("    MTU       : %d", allTunnels[0].DNSTT.MTU))
 	}
 
 	out.Print("")
 	out.Print("    DNS Records Required:")
-	out.Print(fmt.Sprintf("      A  record: ns.%s → your server IP", baseDomain(domain)))
-	out.Print(fmt.Sprintf("      NS record: %s → ns.%s", domain, baseDomain(domain)))
+	shownDomains := make(map[string]bool)
+	for _, t := range allTunnels {
+		if shownDomains[t.Domain] {
+			continue
+		}
+		shownDomains[t.Domain] = true
+		if t.Transport == config.TransportNaive {
+			out.Print(fmt.Sprintf("      A record: %s → your server IP", t.Domain))
+		} else {
+			out.Print(fmt.Sprintf("      A  record: ns.%s → your server IP", baseDomain(t.Domain)))
+			out.Print(fmt.Sprintf("      NS record: %s → ns.%s", t.Domain, baseDomain(t.Domain)))
+		}
+	}
 	out.Print("")
 
 	// Show slipnet:// configs
@@ -370,7 +380,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 		out.Print("    Client Configs:")
 		out.Print("")
 		for _, u := range cfg.Users {
-			for _, t := range tunnels {
+			for _, t := range allTunnels {
 				backendCfg := cfg.GetBackend(t.Backend)
 				if backendCfg == nil {
 					continue

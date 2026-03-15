@@ -1,6 +1,7 @@
 package clientcfg
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net"
 
@@ -18,48 +19,82 @@ type URIOptions struct {
 func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg *config.Config, opts URIOptions) (string, error) {
 	var fields [TotalFields]string
 
-	fields[FieldVersion] = "16"
-	fields[FieldType] = GetTunnelType(tunnel.Transport, tunnel.Backend, opts.ClientMode)
-	fields[FieldDomain] = tunnel.Domain
-	fields[FieldName] = tunnel.Tag
+	// Defaults
+	fields[FVersion] = "16"
+	fields[FTunnelType] = GetTunnelType(tunnel.Transport, tunnel.Backend, opts.ClientMode)
+	fields[FName] = tunnel.Tag
+	fields[FDomain] = tunnel.Domain
+	fields[FResolvers] = "" // user configures in app
+	fields[FAuthMode] = "0"
+	fields[FKeepAlive] = "5000"
+	fields[FCongestionControl] = "bbr"
+	fields[FTCPListenPort] = "1080"
+	fields[FTCPListenHost] = "127.0.0.1"
+	fields[FGSOEnabled] = "0"
+	fields[FSSHEnabled] = "0"
+	fields[FFwdDNSThroughSSH] = "0"
+	fields[FSSHHost] = "127.0.0.1"
+	fields[FUseServerDNS] = "0"
+	fields[FDNSTransport] = "udp"
+	fields[FSSHAuthType] = "password"
+	fields[FDNSTTAuthoritative] = "0"
+	fields[FNaivePort] = "443"
+	fields[FIsLocked] = "0"
+	fields[FExpirationDate] = "0"
+	fields[FAllowSharing] = "0"
 
-	serverIP := getServerIP()
-	fields[FieldServerIP] = serverIP
-
+	// Transport-specific
 	switch tunnel.Transport {
 	case config.TransportDNSTT:
 		if tunnel.DNSTT != nil {
-			fields[FieldPubKey] = tunnel.DNSTT.PublicKey
-			fields[FieldMTU] = fmt.Sprintf("%d", tunnel.DNSTT.MTU)
+			fields[FPublicKey] = tunnel.DNSTT.PublicKey
 		}
 
 	case config.TransportSlipstream:
-		if tunnel.Slipstream != nil {
-			// cert fingerprint could go here
-		}
+		// Slipstream uses cert, no pubkey field needed
 
 	case config.TransportNaive:
 		if tunnel.Naive != nil {
-			fields[FieldSOCKSUser] = tunnel.Naive.User
-			fields[FieldSOCKSPass] = tunnel.Naive.Password
+			fields[FNaivePort] = fmt.Sprintf("%d", tunnel.Naive.Port)
+			fields[FNaiveUser] = tunnel.Naive.User
+			if tunnel.Naive.Password != "" {
+				fields[FNaivePass] = base64.StdEncoding.EncodeToString([]byte(tunnel.Naive.Password))
+			}
 		}
 	}
 
-	// User credentials override backend defaults
+	// User credentials
+	socksUser := ""
+	socksPass := ""
+
 	if opts.Username != "" {
-		if tunnel.Backend == config.BackendSOCKS {
-			fields[FieldSOCKSUser] = opts.Username
-			fields[FieldSOCKSPass] = opts.Password
-		} else if tunnel.Backend == config.BackendSSH {
-			fields[FieldSSHUser] = opts.Username
-			fields[FieldSSHPass] = opts.Password
-		}
+		socksUser = opts.Username
+		socksPass = opts.Password
 	} else if backend != nil && backend.Type == config.BackendSOCKS && backend.SOCKS != nil {
-		if fields[FieldSOCKSUser] == "" {
-			fields[FieldSOCKSUser] = backend.SOCKS.User
+		socksUser = backend.SOCKS.User
+		socksPass = backend.SOCKS.Password
+	}
+
+	fields[FSOCKSUser] = socksUser
+	fields[FSOCKSPass] = socksPass
+
+	// SSH backend
+	if tunnel.Backend == config.BackendSSH {
+		fields[FSSHEnabled] = "1"
+		if opts.Username != "" {
+			fields[FSSHUser] = opts.Username
+			fields[FSSHPass] = opts.Password
 		}
-		if fields[FieldSOCKSPass] == "" {
-			fields[FieldSOCKSPass] = backend.SOCKS.Password
+		fields[FSSHPort] = "22"
+	}
+
+	// NaiveProxy credentials override
+	if tunnel.Transport == config.TransportNaive && tunnel.Naive != nil {
+		if tunnel.Naive.User != "" {
+			fields[FNaiveUser] = tunnel.Naive.User
+		}
+		if tunnel.Naive.Password != "" {
+			fields[FNaivePass] = base64.StdEncoding.EncodeToString([]byte(tunnel.Naive.Password))
 		}
 	}
 
@@ -67,7 +102,6 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 }
 
 func getServerIP() string {
-	// Try to find the public IP by connecting to a known address
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		return ""

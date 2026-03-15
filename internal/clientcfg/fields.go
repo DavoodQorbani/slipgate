@@ -2,25 +2,45 @@ package clientcfg
 
 import "github.com/anonvector/slipgate/internal/config"
 
-// v16 field positions (pipe-delimited).
+// v16 field positions (pipe-delimited, ~35 fields).
+// Matches the SlipNet Android app's ConfigImporter/ConfigExporter.
 const (
-	FieldVersion    = 0  // always "16"
-	FieldType       = 1  // tunnel type
-	FieldDomain     = 2  // tunnel domain
-	FieldPubKey     = 3  // public key (hex)
-	FieldMTU        = 4  // MTU
-	FieldDOH        = 5  // DoH resolver
-	FieldSOCKSUser  = 6  // SOCKS username
-	FieldSOCKSPass  = 7  // SOCKS password
-	FieldSSHUser    = 8  // SSH username
-	FieldSSHPass    = 9  // SSH password
-	FieldServerIP   = 10 // server IP
-	FieldCert       = 11 // certificate fingerprint
-	FieldExtra1     = 12 // extra field 1
-	FieldExtra2     = 13 // extra field 2
-	FieldExtra3     = 14 // extra field 3
-	FieldName       = 15 // profile name
-	TotalFields     = 16
+	FVersion            = 0  // always "16"
+	FTunnelType         = 1  // dnstt, sayedns, dnstt_ssh, sayedns_ssh, naive, naive_ssh, ss, slipstream_ssh
+	FName               = 2  // profile name
+	FDomain             = 3  // tunnel domain
+	FResolvers          = 4  // comma-separated "host:port:auth"
+	FAuthMode           = 5  // "0"
+	FKeepAlive          = 6  // "5000"
+	FCongestionControl  = 7  // "bbr"
+	FTCPListenPort      = 8  // "1080"
+	FTCPListenHost      = 9  // "127.0.0.1"
+	FGSOEnabled         = 10 // "0"
+	FPublicKey          = 11 // hex-encoded Curve25519 public key
+	FSOCKSUser          = 12 // SOCKS5 username
+	FSOCKSPass          = 13 // SOCKS5 password
+	FSSHEnabled         = 14 // "0" or "1"
+	FSSHUser            = 15 // SSH username
+	FSSHPass            = 16 // SSH password
+	FSSHPort            = 17 // "22"
+	FFwdDNSThroughSSH   = 18 // "0" (deprecated)
+	FSSHHost            = 19 // "127.0.0.1"
+	FUseServerDNS       = 20 // "0" (deprecated)
+	FDoHURL             = 21 // DoH URL (empty)
+	FDNSTransport       = 22 // "udp"
+	FSSHAuthType        = 23 // "password"
+	FSSHPrivateKey      = 24 // "" (base64)
+	FSSHKeyPassphrase   = 25 // "" (base64)
+	FTorBridgeLines     = 26 // "" (base64)
+	FDNSTTAuthoritative = 27 // "0"
+	FNaivePort          = 28 // "443"
+	FNaiveUser          = 29 // NaiveProxy username
+	FNaivePass          = 30 // NaiveProxy password (base64)
+	FIsLocked           = 31 // "0"
+	FLockPasswordHash   = 32 // ""
+	FExpirationDate     = 33 // "0"
+	FAllowSharing       = 34 // "0"
+	TotalFields         = 35
 )
 
 // Client modes for DNSTT transport (server is the same, client behavior differs).
@@ -30,7 +50,6 @@ const (
 )
 
 // TunnelTypeMap maps transport+clientMode+backend to slipnet:// field[1] value.
-// For DNSTT transport, the clientMode determines whether the URL uses dnstt or sayedns.
 var TunnelTypeMap = map[string]map[string]map[string]string{
 	config.TransportDNSTT: {
 		ClientModeDNSTT: {
@@ -57,13 +76,11 @@ var TunnelTypeMap = map[string]map[string]map[string]string{
 }
 
 // GetTunnelType returns the slipnet:// type string.
-// clientMode is only relevant for DNSTT transport ("dnstt" or "noizdns").
 func GetTunnelType(transport, backend, clientMode string) string {
 	modes, ok := TunnelTypeMap[transport]
 	if !ok {
 		return "unknown"
 	}
-	// For non-DNSTT transports, clientMode is ignored
 	if transport != config.TransportDNSTT {
 		clientMode = ""
 	}
