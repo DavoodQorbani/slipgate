@@ -11,8 +11,6 @@ const uriScheme = "slipnet://"
 // Uses standard base64 (not URL-safe) with no padding wrapping, matching the app.
 func Encode(fields [TotalFields]string) string {
 	payload := strings.Join(fields[:], "|")
-	// Trailing pipe to match noizdns-deploy format
-	payload += "|"
 	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
 	return uriScheme + encoded
 }
