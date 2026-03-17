@@ -60,8 +60,11 @@ func Run(cfg *config.Config, cfgErr error) error {
 		case "update":
 			if err := runAction(actions.SystemUpdate, cfg); err != nil {
 				printError(err)
+				waitForEnter()
+			} else {
+				fmt.Println("\n  Restart slipgate to use the new version.")
+				return nil
 			}
-			waitForEnter()
 		case "uninstall":
 			if err := runAction(actions.SystemUninstall, cfg); err != nil {
 				printError(err)
