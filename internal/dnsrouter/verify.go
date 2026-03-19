@@ -100,8 +100,11 @@ func (r *Router) handleVerify(packet []byte, clientAddr *net.UDPAddr) bool {
 	mac.Write(nonce)
 	expected := mac.Sum(nil)[:16]
 	if !hmac.Equal(clientProof, expected) {
+		log.Printf("verify: HMAC mismatch from %s", clientAddr)
 		return false // wrong key — forward to backend as normal tunnel traffic
 	}
+
+	log.Printf("verify: valid probe from %s, responding", clientAddr)
 
 	// Valid probe. Compute response: HMAC-SHA256(key, nonce || 0x01)
 	// so the client can verify it's talking to the right server.
