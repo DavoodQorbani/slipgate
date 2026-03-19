@@ -5,7 +5,7 @@ Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, NoizDNS, S
 ## Features
 
 - **Multi-transport**: DNSTT/NoizDNS (DNS tunnels with Curve25519 encryption), Slipstream (QUIC-based DNS), NaiveProxy (HTTPS with Caddy)
-- **Dual backend**: SOCKS5 proxy (microsocks) or SSH forwarding
+- **Dual backend**: Built-in SOCKS5 proxy or SSH forwarding
 - **DNS routing**: Single-tunnel or multi-tunnel mode with domain-based dispatch
 - **User management**: Managed SSH + SOCKS credentials per user
 - **Interactive TUI + CLI**: Menu-driven setup or scriptable subcommands
@@ -44,11 +44,10 @@ Download the binaries you need from the [latest release](https://github.com/anon
 ```bash
 # On your local machine — download binaries
 mkdir slipgate-bundle && cd slipgate-bundle
-curl -LO https://github.com/anonvector/slipgate/releases/download/v1.0.0/slipgate-linux-amd64
-curl -LO https://github.com/anonvector/slipgate/releases/download/v1.0.0/dnstt-server-linux-amd64
-curl -LO https://github.com/anonvector/slipgate/releases/download/v1.0.0/slipstream-server-linux-amd64
-curl -LO https://github.com/anonvector/slipgate/releases/download/v1.0.0/caddy-naive-linux-amd64
-curl -LO https://github.com/anonvector/slipgate/releases/download/v1.0.0/microsocks-linux-amd64
+curl -LO https://github.com/anonvector/slipgate/releases/latest/download/slipgate-linux-amd64
+curl -LO https://github.com/anonvector/slipgate/releases/latest/download/dnstt-server-linux-amd64
+curl -LO https://github.com/anonvector/slipgate/releases/latest/download/slipstream-server-linux-amd64
+curl -LO https://github.com/anonvector/slipgate/releases/latest/download/caddy-naive-linux-amd64
 
 # SCP to server
 scp * user@server:/tmp/slipgate/
@@ -68,12 +67,15 @@ sudo slipgate
 ## CLI Usage
 
 ```
-slipgate                        # Interactive TUI
+slipgate                        # Interactive TUI menu
 slipgate install                # Install dependencies and configure server
-slipgate uninstall              # Remove everything
-slipgate update                 # Check for updates and self-update
+slipgate uninstall              # Remove all services, configs, and binaries
+slipgate update                 # Self-update and restart all services
+slipgate users                  # Manage SSH/SOCKS users and view configs
 
-slipgate tunnel add             # Add a new tunnel (interactive)
+# Tunnel management
+slipgate tunnel add             # Add tunnel(s) — supports multi-select and "both" backend
+slipgate tunnel edit [tag]      # Edit tunnel settings (MTU)
 slipgate tunnel remove [tag]    # Remove a tunnel
 slipgate tunnel start [tag]     # Start a tunnel
 slipgate tunnel stop [tag]      # Stop a tunnel
@@ -81,18 +83,23 @@ slipgate tunnel status          # Show all tunnel statuses
 slipgate tunnel share [tag]     # Generate slipnet:// URI for clients
 slipgate tunnel logs [tag]      # View tunnel logs
 
+# DNS routing
 slipgate router status          # Show DNS routing config
 slipgate router mode            # Switch between single/multi mode
 slipgate router switch          # Change active tunnel (single mode)
 
-slipgate users                  # Manage SSH/SOCKS users
+# Configuration
 slipgate config export          # Export configuration
 slipgate config import          # Import configuration
+
+# Internal (used by systemd services)
+slipgate dnsrouter serve        # Start DNS router
+slipgate socks serve            # Start built-in SOCKS5 proxy
 ```
 
-### Non-Interactive Tunnel Creation
+### Non-Interactive Examples
 
-All tunnel types can be created without interactive prompts, useful for scripting and automation:
+All commands support flags for scripting and automation. If any required flag is omitted, slipgate falls back to an interactive prompt.
 
 ```bash
 # DNSTT tunnel
@@ -102,7 +109,7 @@ sudo slipgate tunnel add \
   --tag mydnstt \
   --domain t.example.com
 
-# DNSTT tunnel with custom keys
+# DNSTT tunnel with custom Curve25519 keys
 sudo slipgate tunnel add \
   --transport dnstt \
   --backend socks \
@@ -110,6 +117,13 @@ sudo slipgate tunnel add \
   --domain t.example.com \
   --private-key <64-char-hex> \
   --public-key <64-char-hex>   # optional, validated if provided
+
+# DNSTT with both backends (creates mydnstt-socks + mydnstt-ssh)
+sudo slipgate tunnel add \
+  --transport dnstt \
+  --backend both \
+  --tag mydnstt \
+  --domain t.example.com
 
 # Slipstream tunnel
 sudo slipgate tunnel add \
@@ -126,9 +140,17 @@ sudo slipgate tunnel add \
   --domain example.com \
   --email admin@example.com \
   --decoy-url https://www.wikipedia.org
-```
 
-If any required flag is omitted, slipgate falls back to an interactive prompt for that field.
+# Direct SSH / SOCKS5 transports
+sudo slipgate tunnel add --transport direct-ssh --tag myssh
+sudo slipgate tunnel add --transport direct-socks5 --tag mysocks
+
+# Change MTU on a DNSTT tunnel
+sudo slipgate tunnel edit --tag mydnstt --mtu 1232
+
+# Share tunnel config as slipnet:// URI
+sudo slipgate tunnel share mydnstt
+```
 
 ## Architecture
 
@@ -152,7 +174,7 @@ If any required flag is omitted, slipgate falls back to an interactive prompt fo
 │     v            v                            v               │
 │  ┌────────────────────────────────────────────────────────┐   │
 │  │                    Backend                              │   │
-│  │           SOCKS5 (microsocks) or SSH                    │   │
+│  │           SOCKS5 (built-in) or SSH                      │   │
 │  └────────────────────────┬───────────────────────────────┘   │
 │                           │                                   │
 │                           v                                   │
@@ -174,7 +196,7 @@ Each DNS tunnel instance requires its own subdomain. When using both SOCKS and S
 
 | Tunnel | Domain | Backend |
 |--------|--------|---------|
-| dnstt-socks | `t.example.com` | SOCKS5 (microsocks) |
+| dnstt-socks | `t.example.com` | SOCKS5 |
 | dnstt-ssh | `ts.example.com` | SSH |
 | slipstream-socks | `s.example.com` | SOCKS5 |
 | slipstream-ssh | `ss.example.com` | SSH |
@@ -215,11 +237,10 @@ This outputs a `slipnet://` URI that can be scanned or imported into the SlipNet
 |------|-------------|
 | `/etc/slipgate/config.json` | Main configuration |
 | `/etc/slipgate/tunnels/` | Per-tunnel keys, certs, and configs |
-| `/usr/local/bin/slipgate` | SlipGate binary |
+| `/usr/local/bin/slipgate` | SlipGate binary (includes built-in SOCKS5 proxy) |
 | `/usr/local/bin/dnstt-server` | DNSTT transport binary |
 | `/usr/local/bin/slipstream-server` | Slipstream transport binary |
 | `/usr/local/bin/caddy-naive` | Caddy with NaiveProxy plugin |
-| `/usr/local/bin/microsocks` | SOCKS5 proxy binary |
 
 ## Building
 
