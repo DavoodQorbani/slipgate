@@ -11,6 +11,7 @@ import (
 	"github.com/anonvector/slipgate/internal/binary"
 	"github.com/anonvector/slipgate/internal/config"
 	"github.com/anonvector/slipgate/internal/proxy"
+	"github.com/anonvector/slipgate/internal/service"
 	"github.com/anonvector/slipgate/internal/version"
 )
 
@@ -103,9 +104,26 @@ func handleSystemUpdate(ctx *actions.Context) error {
 		}
 	}
 
+	// Restart all slipgate services
+	out.Print("")
+	out.Info("Restarting services...")
+	cfg := ctx.Config.(*config.Config)
+	for _, t := range cfg.Tunnels {
+		svcName := service.TunnelServiceName(t.Tag)
+		if err := service.Restart(svcName); err != nil {
+			out.Warning(fmt.Sprintf("Failed to restart %s: %v", svcName, err))
+		} else {
+			out.Success(fmt.Sprintf("  %s restarted", svcName))
+		}
+	}
+	if err := service.Restart("slipgate-dnsrouter"); err == nil {
+		out.Success("  slipgate-dnsrouter restarted")
+	}
+	if err := service.Restart("slipgate-socks5"); err == nil {
+		out.Success("  slipgate-socks5 restarted")
+	}
+
 	out.Print("")
 	out.Success("Update complete!")
-	out.Info("Restart services to use new binaries: sudo systemctl restart slipgate-*")
-
 	return nil
 }
