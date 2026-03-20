@@ -116,11 +116,13 @@ func (r *Router) handleVerify(packet []byte, clientAddr *net.UDPAddr) bool {
 
 	respEncoded := verifyEncoding.EncodeToString(respBytes)
 
-	// Pad to MTU so the response matches real dnstt/slipstream response sizes.
+	// Pad response to look like real tunnel traffic, but cap total at 468 bytes
+	// to stay safely under 512-byte UDP limit and avoid IP fragmentation.
+	// Fragmented DNS responses are dropped by many resolvers and middleboxes.
 	if vr.mtu > 0 {
-		// Header(12) + Question(qEnd-12) + Answer pointer(2) + type(2) + class(2) + TTL(4) + rdlen(2) + txtlen(1) = 25
 		overhead := qEnd + 25
-		targetTXT := vr.mtu - overhead
+		maxTotal := 468 // safe UDP DNS limit (well under 512)
+		targetTXT := maxTotal - overhead
 		if targetTXT > len(respEncoded) {
 			respEncoded = padResponse(respEncoded, targetTXT)
 		}
@@ -192,7 +194,7 @@ func buildTXTResponse(query []byte, qEnd int, txt string) []byte {
 	resp = append(resp, 0xC0, 0x0C)              // name pointer to offset 12
 	resp = append(resp, 0x00, 0x10)              // TYPE = TXT
 	resp = append(resp, 0x00, 0x01)              // CLASS = IN
-	resp = append(resp, 0x00, 0x01, 0x51, 0x80) // TTL = 86400
+	resp = append(resp, 0x00, 0x00, 0x00, 0x00) // TTL = 0 (don't cache verify responses)
 
 	// Build RDATA with character-strings (max 255 bytes each)
 	txtBytes := []byte(txt)
