@@ -90,6 +90,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 	needsHTTPS := false
 	needsSSHPort := false
 	needsSOCKSPort := false
+	needsWireguard := false
 	for _, t := range transports {
 		switch t {
 		case config.TransportDNSTT, config.TransportSlipstream:
@@ -100,6 +101,8 @@ func handleSystemInstall(ctx *actions.Context) error {
 			needsSSHPort = true
 		case config.TransportSOCKS:
 			needsSOCKSPort = true
+		case config.TransportWireguard:
+			needsWireguard = true
 		}
 	}
 	if needsDNS {
@@ -127,6 +130,20 @@ func handleSystemInstall(ctx *actions.Context) error {
 	if needsSOCKSPort {
 		if err := network.AllowPort(1080, "tcp"); err != nil {
 			out.Warning("Failed to open port 1080/tcp: " + err.Error())
+		}
+	}
+	if needsWireguard {
+		out.Info("Installing WireGuard...")
+		if err := transport.EnsureWireguardInstalled(); err != nil {
+			out.Warning("Failed to install WireGuard: " + err.Error())
+		} else {
+			out.Success("WireGuard installed")
+		}
+		if err := transport.EnableIPForwarding(); err != nil {
+			out.Warning("Failed to enable IP forwarding: " + err.Error())
+		}
+		if err := network.AllowPort(51820, "udp"); err != nil {
+			out.Warning("Failed to open port 51820/udp: " + err.Error())
 		}
 	}
 
@@ -192,6 +209,60 @@ func handleSystemInstall(ctx *actions.Context) error {
 					setupSOCKS = true
 				}
 				out.Success(fmt.Sprintf("Tunnel %q added", tag))
+			}
+			continue
+		}
+
+		// WireGuard: generate keys and create tunnel
+		if selectedTransport == config.TransportWireguard {
+			tag := "wireguard"
+			tunnelDir := config.TunnelDir(tag)
+			if err := os.MkdirAll(tunnelDir, 0750); err != nil {
+				out.Warning("Failed to create tunnel dir: " + err.Error())
+				continue
+			}
+
+			out.Info("Generating WireGuard keypairs...")
+			serverPriv, serverPub, err := transport.GenerateWireguardKeys()
+			if err != nil {
+				out.Warning("Failed to generate server keys: " + err.Error())
+				continue
+			}
+			clientPriv, clientPub, err := transport.GenerateWireguardKeys()
+			if err != nil {
+				out.Warning("Failed to generate client keys: " + err.Error())
+				continue
+			}
+
+			privKeyPath := filepath.Join(tunnelDir, "wg-server.key")
+			if err := os.WriteFile(privKeyPath, []byte(serverPriv+"\n"), 0600); err != nil {
+				out.Warning("Failed to write server key: " + err.Error())
+				continue
+			}
+
+			tunnel := config.TunnelConfig{
+				Tag:       tag,
+				Transport: config.TransportWireguard,
+				Backend:   "wireguard",
+				Enabled:   true,
+				Wireguard: &config.WireguardConfig{
+					ListenPort:    51820,
+					ServerPrivKey: privKeyPath,
+					ServerPubKey:  serverPub,
+					ClientPrivKey: clientPriv,
+					ClientPubKey:  clientPub,
+					ServerAddress: "10.0.0.1/24",
+					ClientAddress: "10.0.0.2/32",
+					DNS:           "1.1.1.1",
+				},
+			}
+
+			if err := cfg.ValidateNewTunnel(&tunnel); err != nil {
+				out.Warning(fmt.Sprintf("Skip %s: %v", tag, err))
+			} else {
+				cfg.AddTunnel(tunnel)
+				allTunnels = append(allTunnels, tunnel)
+				out.Success(fmt.Sprintf("WireGuard tunnel added (pub: %s)", serverPub))
 			}
 			continue
 		}
@@ -550,6 +621,18 @@ func handleSystemInstall(ctx *actions.Context) error {
 					out.Print(fmt.Sprintf("    %s", uri))
 					out.Print("")
 				}
+			}
+		}
+	}
+
+	// Show WireGuard client configs
+	for _, t := range allTunnels {
+		if t.Transport == config.TransportWireguard && t.Wireguard != nil {
+			serverIP := network.PublicIP()
+			if serverIP != "" {
+				out.Print(fmt.Sprintf("    [%s] WireGuard client config:", t.Tag))
+				out.Print("")
+				out.Print(transport.GenerateClientConfig(&t, serverIP))
 			}
 		}
 	}
