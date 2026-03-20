@@ -24,7 +24,7 @@ func (c *Config) Validate() error {
 		}
 		tags[t.Tag] = true
 
-		if t.Domain == "" && t.Transport != TransportSSH && t.Transport != TransportSOCKS {
+		if t.Domain == "" && t.Transport != TransportSSH && t.Transport != TransportSOCKS && t.Transport != TransportWireguard {
 			return fmt.Errorf("tunnel %q: domain is required", t.Tag)
 		}
 		if t.Domain != "" {
@@ -62,7 +62,7 @@ func (c *Config) ValidateNewTunnel(t *TunnelConfig) error {
 	if c.GetTunnel(t.Tag) != nil {
 		return fmt.Errorf("tunnel tag %q already exists", t.Tag)
 	}
-	if t.Domain == "" && t.Transport != TransportSSH && t.Transport != TransportSOCKS {
+	if t.Domain == "" && t.Transport != TransportSSH && t.Transport != TransportSOCKS && t.Transport != TransportWireguard {
 		return fmt.Errorf("domain is required")
 	}
 	c.mu.RLock()
@@ -88,7 +88,7 @@ func validateTag(tag string) error {
 
 func validateTransport(transport string) error {
 	switch transport {
-	case TransportDNSTT, TransportSlipstream, TransportNaive, TransportSSH, TransportSOCKS:
+	case TransportDNSTT, TransportSlipstream, TransportNaive, TransportSSH, TransportSOCKS, TransportWireguard:
 		return nil
 	}
 	return fmt.Errorf("unknown transport: %s", transport)
@@ -96,7 +96,7 @@ func validateTransport(transport string) error {
 
 func validateBackend(backend string) error {
 	switch backend {
-	case BackendSOCKS, BackendSSH:
+	case BackendSOCKS, BackendSSH, "wireguard":
 		return nil
 	}
 	return fmt.Errorf("unknown backend: %s", backend)
