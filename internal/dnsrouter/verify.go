@@ -127,7 +127,7 @@ func (r *Router) handleVerify(packet []byte, clientAddr *net.UDPAddr) bool {
 		respEncoded = padResponse(respEncoded, targetTXT)
 	}
 
-	resp := buildTXTResponseWithEDNS(packet, qEnd, respEncoded, 1232)
+	resp := buildTXTResponseWithEDNS(packet, qEnd, respEncoded, 4096)
 	if _, err := r.conn.WriteToUDP(resp, clientAddr); err != nil {
 		log.Printf("verify: write: %v", err)
 	}
@@ -178,13 +178,13 @@ func (r *Router) findVerifyRoute(labels []string) *verifyRoute {
 func buildTXTResponseWithEDNS(query []byte, qEnd int, txt string, ednsPayloadSize int) []byte {
 	var resp []byte
 
-	// Header
-	resp = append(resp, query[0], query[1])         // Transaction ID
-	resp = append(resp, 0x84|(query[2]&0x01), 0x00) // QR=1, AA=1, RD=copy
-	resp = append(resp, 0x00, 0x01)                 // QDCOUNT = 1
-	resp = append(resp, 0x00, 0x01)                 // ANCOUNT = 1
-	resp = append(resp, 0x00, 0x00)                 // NSCOUNT = 0
-	resp = append(resp, 0x00, 0x01)                 // ARCOUNT = 1 (EDNS0 OPT)
+	// Header — match dnstt-server exactly: QR=1, AA=1, RD=0, RA=0
+	resp = append(resp, query[0], query[1]) // Transaction ID
+	resp = append(resp, 0x84, 0x00)         // Flags: QR=1, AA=1 (0x8400)
+	resp = append(resp, 0x00, 0x01)         // QDCOUNT = 1
+	resp = append(resp, 0x00, 0x01)         // ANCOUNT = 1
+	resp = append(resp, 0x00, 0x00)         // NSCOUNT = 0
+	resp = append(resp, 0x00, 0x01)         // ARCOUNT = 1 (EDNS0 OPT)
 
 	// Question section (copy from query)
 	resp = append(resp, query[12:qEnd]...)
@@ -193,7 +193,7 @@ func buildTXTResponseWithEDNS(query []byte, qEnd int, txt string, ednsPayloadSiz
 	resp = append(resp, 0xC0, 0x0C)              // name pointer to offset 12
 	resp = append(resp, 0x00, 0x10)              // TYPE = TXT
 	resp = append(resp, 0x00, 0x01)              // CLASS = IN
-	resp = append(resp, 0x00, 0x00, 0x00, 0x00) // TTL = 0
+	resp = append(resp, 0x00, 0x00, 0x00, 0x3C) // TTL = 60 (matches dnstt-server ResponseTTL)
 
 	// Build RDATA with character-strings (max 255 bytes each)
 	txtBytes := []byte(txt)
