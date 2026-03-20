@@ -114,39 +114,31 @@ func (r *Router) handleVerify(packet []byte, clientAddr *net.UDPAddr) bool {
 	mac2 := hmac.New(sha256.New, vr.pubkey)
 	mac2.Write(nonce)
 	mac2.Write([]byte{0x01})
-	respBytes := mac2.Sum(nil) // 32 bytes → 52 base32 chars
+	respHMAC := mac2.Sum(nil) // 32 bytes
 
-	respEncoded := verifyEncoding.EncodeToString(respBytes)
-
-	// Pad to match real dnstt-server response sizes. Real responses vary
-	// based on tunnel data (~60-250 bytes), not the configured MTU.
-	// Randomize within the observed range so prism responses have natural
-	// variation like real tunnel traffic.
+	// Build raw binary TXT payload: 32-byte HMAC + random binary padding.
+	// Matches real dnstt-server responses which contain raw encrypted data.
+	// TXT record overhead per 255-byte chunk = 1 byte length prefix.
 	overhead := qEnd + 14 + 11 // header+question + answer fixed + EDNS0 OPT
 	targetTotal := 200 + randInt(60) // 200-260 bytes total
-	targetTXT := targetTotal - overhead
-	if targetTXT > len(respEncoded) {
-		respEncoded = padResponse(respEncoded, targetTXT)
+	targetPayload := targetTotal - overhead
+	// Account for TXT length prefixes: ~1 byte per 255 bytes of data
+	targetData := targetPayload - (targetPayload / 256) - 1
+	if targetData < 32 {
+		targetData = 32
 	}
 
-	resp := buildTXTResponseWithEDNS(packet, qEnd, respEncoded, 4096)
+	payload := make([]byte, targetData)
+	copy(payload, respHMAC)
+	if targetData > 32 {
+		rand.Read(payload[32:]) // random binary padding like encrypted tunnel data
+	}
+
+	resp := buildBinaryTXTResponseWithEDNS(packet, qEnd, payload, 4096)
 	if _, err := r.conn.WriteToUDP(resp, clientAddr); err != nil {
 		log.Printf("verify: write: %v", err)
 	}
 	return true
-}
-
-// padResponse pads txt with deterministic fill bytes to reach targetLen.
-func padResponse(txt string, targetLen int) string {
-	if targetLen <= len(txt) {
-		return txt
-	}
-	var b strings.Builder
-	b.WriteString(txt)
-	for b.Len() < targetLen {
-		b.WriteByte(txt[b.Len()%len(txt)])
-	}
-	return b.String()[:targetLen]
 }
 
 // findVerifyRoute returns the verify route whose domain suffix matches labels.
@@ -177,7 +169,9 @@ func (r *Router) findVerifyRoute(labels []string) *verifyRoute {
 
 // buildTXTResponseWithEDNS constructs a DNS TXT response with EDNS0 OPT record.
 // Matches real dnstt-server responses: TXT answer + EDNS0 with advertised UDP size.
-func buildTXTResponseWithEDNS(query []byte, qEnd int, txt string, ednsPayloadSize int) []byte {
+// buildBinaryTXTResponseWithEDNS constructs a DNS TXT response with raw binary
+// payload and EDNS0 OPT record. Matches real dnstt-server response format.
+func buildBinaryTXTResponseWithEDNS(query []byte, qEnd int, data []byte, ednsPayloadSize int) []byte {
 	var resp []byte
 
 	// Header — match dnstt-server exactly: QR=1, AA=1, RD=0, RA=0
@@ -198,16 +192,16 @@ func buildTXTResponseWithEDNS(query []byte, qEnd int, txt string, ednsPayloadSiz
 	resp = append(resp, 0x00, 0x00, 0x00, 0x3C) // TTL = 60 (matches dnstt-server ResponseTTL)
 
 	// Build RDATA with character-strings (max 255 bytes each)
-	txtBytes := []byte(txt)
 	var rdata []byte
-	for len(txtBytes) > 0 {
-		chunk := txtBytes
+	remaining := data
+	for len(remaining) > 0 {
+		chunk := remaining
 		if len(chunk) > 255 {
 			chunk = chunk[:255]
 		}
 		rdata = append(rdata, byte(len(chunk)))
 		rdata = append(rdata, chunk...)
-		txtBytes = txtBytes[len(chunk):]
+		remaining = remaining[len(chunk):]
 	}
 
 	// RDLENGTH

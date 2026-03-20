@@ -69,29 +69,19 @@ func verifyOnce(host string, port int, domain string, pubkey []byte, timeoutMs i
 		return false
 	}
 
-	// 6. Extract first TXT record content
-	txt := extractFirstTXT(respBuf[:n])
-	if txt == "" {
+	// 6. Extract raw binary TXT data
+	rawData := extractFirstTXTRaw(respBuf[:n])
+	if len(rawData) < 32 {
 		return false
 	}
 
-	// Server pads to MTU — take only the first 52 chars (32 bytes)
-	if len(txt) > 52 {
-		txt = txt[:52]
-	}
-
-	// 7. base32-decode and verify: HMAC-SHA256(key, nonce||0x01) == decoded
-	decoded, err := verifyEncoding.DecodeString(txt)
-	if err != nil || len(decoded) != 32 {
-		return false
-	}
-
+	// 7. First 32 bytes = HMAC-SHA256(key, nonce||0x01)
 	mac2 := hmac.New(sha256.New, pubkey)
 	mac2.Write(nonce)
 	mac2.Write([]byte{0x01})
 	expected := mac2.Sum(nil)
 
-	return hmac.Equal(decoded, expected)
+	return hmac.Equal(rawData[:32], expected)
 }
 
 // buildTXTQuery builds a minimal DNS TXT query for the given domain.
@@ -135,15 +125,15 @@ func splitLabels(domain string) []string {
 	return labels
 }
 
-// extractFirstTXT parses a raw DNS response and returns the concatenated
-// character-strings of the first TXT answer record.
-func extractFirstTXT(buf []byte) string {
+// extractFirstTXTRaw parses a raw DNS response and returns the concatenated
+// binary data of the first TXT answer record.
+func extractFirstTXTRaw(buf []byte) []byte {
 	if len(buf) < 12 {
-		return ""
+		return nil
 	}
 	ancount := int(binary.BigEndian.Uint16(buf[6:8]))
 	if ancount == 0 {
-		return ""
+		return nil
 	}
 
 	// Skip question section
@@ -152,7 +142,7 @@ func extractFirstTXT(buf []byte) string {
 	for i := 0; i < qdcount; i++ {
 		offset = skipName(buf, offset)
 		if offset < 0 || offset+4 > len(buf) {
-			return ""
+			return nil
 		}
 		offset += 4 // QTYPE + QCLASS
 	}
@@ -161,14 +151,14 @@ func extractFirstTXT(buf []byte) string {
 	for i := 0; i < ancount; i++ {
 		offset = skipName(buf, offset)
 		if offset < 0 || offset+10 > len(buf) {
-			return ""
+			return nil
 		}
 		rrtype := int(binary.BigEndian.Uint16(buf[offset : offset+2]))
 		offset += 8 // TYPE + CLASS + TTL
 		rdlen := int(binary.BigEndian.Uint16(buf[offset : offset+2]))
 		offset += 2
 		if offset+rdlen > len(buf) {
-			return ""
+			return nil
 		}
 		if rrtype == 16 { // TXT
 			end := offset + rdlen
@@ -183,11 +173,11 @@ func extractFirstTXT(buf []byte) string {
 				out = append(out, buf[pos:pos+strLen]...)
 				pos += strLen
 			}
-			return string(out)
+			return out
 		}
 		offset += rdlen
 	}
-	return ""
+	return nil
 }
 
 // skipName advances offset past a DNS name (labels or pointer).
