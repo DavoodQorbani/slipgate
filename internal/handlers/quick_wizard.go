@@ -178,9 +178,10 @@ func handleQuickWizard(ctx *actions.Context) error {
 		if backend == "both" {
 			tag = selectedTransport + "-" + b
 			if b == config.BackendSSH && selectedTransport != config.TransportNaive {
-				sshHint := "ts.example.com"
+				parentDomain := baseDomain(domain)
+				sshHint := "ts." + parentDomain
 				if selectedTransport == config.TransportSlipstream {
-					sshHint = "ss.example.com"
+					sshHint = "ss." + parentDomain
 				}
 				tunnelDomain, err = prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", tag, sshHint), "")
 				if err != nil {
