@@ -472,7 +472,10 @@ func handleSystemInstall(ctx *actions.Context) error {
 		}
 	}
 
-	// Setup SOCKS5 proxy AFTER user creation so auth is configured from the start
+	// Kill anything holding port 1080 before starting our SOCKS5 proxy
+	if setupSOCKS {
+		network.FreePort(1080, "tcp")
+	}
 	if setupSOCKS {
 		if directSOCKS {
 			// Direct SOCKS5 transport: listen on all interfaces

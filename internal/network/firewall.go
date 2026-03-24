@@ -85,6 +85,70 @@ func DisableResolvedStub() error {
 	return nil
 }
 
+// FreePort kills any process listening on the given port/protocol.
+// Uses fuser if available, falls back to lsof + kill.
+func FreePort(port int, proto string) error {
+	if _, err := exec.LookPath("fuser"); err == nil {
+		// fuser -k sends SIGKILL to all processes using the port
+		protoFlag := fmt.Sprintf("%d/%s", port, proto)
+		_ = exec.Command("fuser", "-k", protoFlag).Run()
+		return nil
+	}
+
+	// Fallback: ss to find PIDs, then kill
+	out, err := exec.Command("ss", "-tlnp", fmt.Sprintf("sport = :%d", port)).Output()
+	if err != nil {
+		return nil // can't determine, skip
+	}
+	// Parse PIDs from ss output (format: pid=1234)
+	for _, line := range splitLines(string(out)) {
+		for _, field := range splitFields(line) {
+			if len(field) > 4 && field[:4] == "pid=" {
+				pid := field[4:]
+				// strip trailing comma or paren
+				for len(pid) > 0 && (pid[len(pid)-1] == ',' || pid[len(pid)-1] == ')') {
+					pid = pid[:len(pid)-1]
+				}
+				_ = exec.Command("kill", "-9", pid).Run()
+			}
+		}
+	}
+	return nil
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+func splitFields(s string) []string {
+	var fields []string
+	i := 0
+	for i < len(s) {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+			i++
+		}
+		start := i
+		for i < len(s) && s[i] != ' ' && s[i] != '\t' {
+			i++
+		}
+		if start < i {
+			fields = append(fields, s[start:i])
+		}
+	}
+	return fields
+}
+
 func run(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	return cmd.Run()

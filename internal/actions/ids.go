@@ -22,6 +22,7 @@ const (
 	SystemUninstall = "system.uninstall"
 	SystemUpdate    = "system.update"
 	SystemUsers     = "system.users"
+	QuickWizard     = "system.wizard"
 
 	// Config actions
 	ConfigExport = "config.export"

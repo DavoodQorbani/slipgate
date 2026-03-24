@@ -35,6 +35,7 @@ func init() {
 	register(actions.RouterStatus, handleRouterStatus)
 	register(actions.RouterMode, handleRouterMode)
 	register(actions.RouterSwitch, handleRouterSwitch)
+	register(actions.QuickWizard, handleQuickWizard)
 	register(actions.SystemInstall, handleSystemInstall)
 	register(actions.SystemUninstall, handleSystemUninstall)
 	register(actions.SystemUpdate, handleSystemUpdate)

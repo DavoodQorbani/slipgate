@@ -34,6 +34,12 @@ func init() {
 	})
 
 	Register(&Action{
+		ID:       QuickWizard,
+		Name:     "Quick Wizard",
+		Category: "system",
+	})
+
+	Register(&Action{
 		ID:       ConfigExport,
 		Name:     "Export Config",
 		Category: "config",
