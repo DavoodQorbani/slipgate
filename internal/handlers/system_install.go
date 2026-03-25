@@ -384,6 +384,10 @@ func handleSystemInstall(ctx *actions.Context) error {
 
 	// Create and start systemd services
 	for i := range allTunnels {
+		// Free the port in case a stale process is holding it
+		if allTunnels[i].IsDNSTunnel() && allTunnels[i].Port > 0 {
+			network.FreePort(allTunnels[i].Port, "udp")
+		}
 		out.Info(fmt.Sprintf("Creating service for %q...", allTunnels[i].Tag))
 		if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
 			return actions.NewError(actions.SystemInstall, fmt.Sprintf("failed to create service for %s", allTunnels[i].Tag), err)

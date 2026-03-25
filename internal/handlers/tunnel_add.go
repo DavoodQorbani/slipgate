@@ -9,6 +9,7 @@ import (
 	"github.com/anonvector/slipgate/internal/certs"
 	"github.com/anonvector/slipgate/internal/config"
 	"github.com/anonvector/slipgate/internal/keys"
+	"github.com/anonvector/slipgate/internal/network"
 	"github.com/anonvector/slipgate/internal/prompt"
 	"github.com/anonvector/slipgate/internal/router"
 	"github.com/anonvector/slipgate/internal/transport"
@@ -219,6 +220,11 @@ func addSingleTunnel(ctx *actions.Context, cfg *config.Config, transport_, backe
 
 	if err := cfg.Save(); err != nil {
 		return actions.NewError(actions.TunnelAdd, "failed to save config", err)
+	}
+
+	// Free the port in case a stale process is holding it
+	if tunnel.IsDNSTunnel() && tunnel.Port > 0 {
+		network.FreePort(tunnel.Port, "udp")
 	}
 
 	// Create and start systemd service

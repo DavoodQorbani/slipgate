@@ -325,6 +325,9 @@ func handleQuickWizard(ctx *actions.Context) error {
 
 	// Start tunnel services
 	for i := range allTunnels {
+		if allTunnels[i].IsDNSTunnel() && allTunnels[i].Port > 0 {
+			network.FreePort(allTunnels[i].Port, "udp")
+		}
 		out.Info(fmt.Sprintf("Starting %s...", allTunnels[i].Tag))
 		if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
 			return actions.NewError(actions.QuickWizard, fmt.Sprintf("failed to start %s", allTunnels[i].Tag), err)
