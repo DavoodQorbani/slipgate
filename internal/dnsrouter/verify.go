@@ -93,16 +93,10 @@ func (r *Router) handleVerify(packet []byte, clientAddr *net.UDPAddr) bool {
 		return false
 	}
 
-	// Concatenate all subdomain labels.
-	// nonce[16] || clientProof[16] = 32 bytes → exactly 52 base32 chars.
-	// Quick length check before expensive decode to skip real tunnel traffic fast.
+	// Concatenate all subdomain labels and base32-decode.
 	encoded := strings.Join(labels[:len(labels)-dl], "")
-	if len(encoded) != 52 {
-		return false
-	}
-
 	decoded, err := verifyEncoding.DecodeString(encoded)
-	if err != nil || len(decoded) != 32 {
+	if err != nil || len(decoded) < 32 {
 		return false
 	}
 
