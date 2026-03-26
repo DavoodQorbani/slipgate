@@ -39,16 +39,22 @@ const wgcfVersion = "2.2.22"
 var httpClient = &http.Client{Timeout: 120 * time.Second}
 
 // Setup registers a WARP account, generates WireGuard config, and creates the systemd service.
-func Setup(cfg *config.Config) error {
+func Setup(cfg *config.Config, log func(string)) error {
+	if log == nil {
+		log = func(string) {}
+	}
+
 	if err := os.MkdirAll(WarpDir, 0750); err != nil {
 		return fmt.Errorf("create warp dir: %w", err)
 	}
 
+	log("Installing wireguard-tools...")
 	if err := ensureWireGuardTools(); err != nil {
 		return fmt.Errorf("install wireguard-tools: %w", err)
 	}
 
 	if _, err := os.Stat(WgcfBin); os.IsNotExist(err) {
+		log("Downloading wgcf...")
 		if err := downloadWgcf(); err != nil {
 			return fmt.Errorf("download wgcf: %w", err)
 		}
@@ -56,6 +62,7 @@ func Setup(cfg *config.Config) error {
 
 	// Register WARP account
 	if _, err := os.Stat(AccountFile); os.IsNotExist(err) {
+		log("Registering WARP account...")
 		cmd := exec.Command(WgcfBin, "register", "--accept-tos")
 		cmd.Dir = WarpDir
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -65,6 +72,7 @@ func Setup(cfg *config.Config) error {
 
 	// Generate WireGuard profile
 	if _, err := os.Stat(ProfileFile); os.IsNotExist(err) {
+		log("Generating WireGuard profile...")
 		cmd := exec.Command(WgcfBin, "generate")
 		cmd.Dir = WarpDir
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -72,6 +80,7 @@ func Setup(cfg *config.Config) error {
 		}
 	}
 
+	log("Creating service users...")
 	if err := ensureSocksUser(); err != nil {
 		return fmt.Errorf("create socks user: %w", err)
 	}
@@ -84,6 +93,7 @@ func Setup(cfg *config.Config) error {
 		return fmt.Errorf("set naive capability: %w", err)
 	}
 
+	log("Generating WireGuard config...")
 	if err := generateWgConf(cfg); err != nil {
 		return fmt.Errorf("generate wg config: %w", err)
 	}
@@ -351,13 +361,22 @@ func ensureWireGuardTools() error {
 	if _, err := exec.LookPath("wg-quick"); err == nil {
 		return nil
 	}
-	if tryRun("apt-get", "install", "-y", "wireguard-tools") == nil {
+
+	// Try apt (Debian/Ubuntu) with noninteractive frontend
+	cmd := exec.Command("apt-get", "install", "-y", "wireguard-tools")
+	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if cmd.Run() == nil {
 		return nil
 	}
-	if tryRun("dnf", "install", "-y", "wireguard-tools") == nil {
+
+	// Try dnf (Fedora/RHEL 8+)
+	if run("dnf", "install", "-y", "wireguard-tools") == nil {
 		return nil
 	}
-	if tryRun("yum", "install", "-y", "wireguard-tools") == nil {
+	// Try yum (CentOS/RHEL 7)
+	if run("yum", "install", "-y", "wireguard-tools") == nil {
 		return nil
 	}
 	return fmt.Errorf("please install wireguard-tools manually")

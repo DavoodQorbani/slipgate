@@ -510,7 +510,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 	if enableWarp {
 		out.Info("Setting up Cloudflare WARP...")
-		if err := warp.Setup(cfg); err != nil {
+		if err := warp.Setup(cfg, func(msg string) { out.Info(msg) }); err != nil {
 			out.Warning("WARP setup failed: " + err.Error())
 		} else {
 			if err := warp.Enable(); err != nil {

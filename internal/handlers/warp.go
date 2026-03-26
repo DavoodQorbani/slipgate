@@ -25,7 +25,7 @@ func handleWarp(ctx *actions.Context) error {
 		}
 
 		out.Info("Setting up Cloudflare WARP...")
-		if err := warp.Setup(cfg); err != nil {
+		if err := warp.Setup(cfg, func(msg string) { out.Info(msg) }); err != nil {
 			return actions.NewError(actions.WarpToggle, "WARP setup failed", err)
 		}
 		out.Success("WARP configured")
