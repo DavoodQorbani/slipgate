@@ -8,6 +8,7 @@ import (
 	"github.com/anonvector/slipgate/internal/prompt"
 	"github.com/anonvector/slipgate/internal/service"
 	"github.com/anonvector/slipgate/internal/system"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemUninstall(ctx *actions.Context) error {
@@ -41,6 +42,11 @@ func handleSystemUninstall(ctx *actions.Context) error {
 	_ = service.Remove("slipgate-socks5")
 	_ = service.Stop("slipgate-microsocks")
 	_ = service.Remove("slipgate-microsocks")
+
+	// Stop WARP and remove its dedicated users
+	out.Info("Removing WARP...")
+	warp.Uninstall()
+	warp.RemoveUsers()
 
 	// Remove config directory
 	out.Info("Removing /etc/slipgate/...")

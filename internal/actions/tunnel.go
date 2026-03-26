@@ -87,10 +87,4 @@ func init() {
 		},
 	})
 
-	Register(&Action{
-		ID:       TunnelScan,
-		Name:     "Scan Resolvers",
-		Category: "tunnel",
-		Inputs:   []InputField{},
-	})
 }

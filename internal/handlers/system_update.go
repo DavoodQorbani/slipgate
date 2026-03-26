@@ -13,6 +13,7 @@ import (
 	"github.com/anonvector/slipgate/internal/proxy"
 	"github.com/anonvector/slipgate/internal/service"
 	"github.com/anonvector/slipgate/internal/version"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemUpdate(ctx *actions.Context) error {
@@ -88,6 +89,9 @@ func handleSystemUpdate(ctx *actions.Context) error {
 			pass = cfg.Users[0].Password
 		}
 
+		if cfg.Warp.Enabled {
+			proxy.RunAsUser = warp.SocksUser
+		}
 		var setupErr error
 		if directSOCKS {
 			setupErr = proxy.SetupSOCKSExternal(user, pass)
@@ -101,6 +105,20 @@ func handleSystemUpdate(ctx *actions.Context) error {
 		} else {
 			os.Remove(microsocksPath)
 			out.Success("Migrated to built-in SOCKS5 proxy")
+		}
+	}
+
+	// Re-apply cap_net_bind_service to caddy-naive if WARP is enabled,
+	// since the capability is lost when the binary is replaced.
+	{
+		cfg := ctx.Config.(*config.Config)
+		if cfg.Warp.Enabled {
+			naivePath := filepath.Join(config.DefaultBinDir, "caddy-naive")
+			if _, err := os.Stat(naivePath); err == nil {
+				if err := exec.Command("setcap", "cap_net_bind_service=+ep", naivePath).Run(); err != nil {
+					out.Warning("Failed to re-set caddy-naive capability: " + err.Error())
+				}
+			}
 		}
 	}
 

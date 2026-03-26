@@ -10,6 +10,11 @@ import (
 
 const socksServiceName = "slipgate-socks5"
 
+// RunAsUser overrides the system user for the SOCKS5 service.
+// When non-empty the service runs as this user instead of config.SystemUser.
+// Set this before calling any Setup* function when WARP routing is active.
+var RunAsUser string
+
 // SetupSOCKS creates the SOCKS5 proxy service (localhost only).
 func SetupSOCKS() error {
 	return setupSOCKS("127.0.0.1", "", "")
@@ -40,11 +45,16 @@ func setupSOCKS(listenAddr, user, password string) error {
 	_ = service.Stop("slipgate-microsocks")
 	_ = service.Remove("slipgate-microsocks")
 
+	svcUser := config.SystemUser
+	if RunAsUser != "" {
+		svcUser = RunAsUser
+	}
+
 	unit := &service.Unit{
 		Name:        socksServiceName,
 		Description: "SlipGate SOCKS5 proxy",
 		ExecStart:   args,
-		User:        config.SystemUser,
+		User:        svcUser,
 		Group:       config.SystemGroup,
 		After:       "network.target",
 		Restart:     "always",

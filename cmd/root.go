@@ -87,7 +87,6 @@ func registerActionCommands() {
 		actions.TunnelStatus: "status",
 		actions.TunnelLogs:   "logs",
 		actions.TunnelEdit:   "edit",
-		actions.TunnelScan:   "scan",
 	}
 	for id, use := range tunnelActions {
 		a, ok := actions.Get(id)

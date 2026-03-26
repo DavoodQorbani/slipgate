@@ -10,6 +10,7 @@ import (
 	"github.com/anonvector/slipgate/internal/prompt"
 	"github.com/anonvector/slipgate/internal/proxy"
 	"github.com/anonvector/slipgate/internal/system"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemUsers(ctx *actions.Context) error {
@@ -100,6 +101,9 @@ func handleSystemUsers(ctx *actions.Context) error {
 		}
 
 		// Update microsocks with auth
+		if cfg.Warp.Enabled {
+			proxy.RunAsUser = warp.SocksUser
+		}
 		if err := proxy.SetupSOCKSWithAuth(username, password); err != nil {
 			out.Warning("Failed to update SOCKS proxy auth: " + err.Error())
 		}
@@ -111,6 +115,13 @@ func handleSystemUsers(ctx *actions.Context) error {
 		}
 
 		out.Success(fmt.Sprintf("User %q added (SSH + SOCKS)", username))
+
+		// Update WARP routing rules for the new user
+		if cfg.Warp.Enabled {
+			if err := warp.RefreshRouting(cfg); err != nil {
+				out.Warning("Failed to update WARP routing: " + err.Error())
+			}
+		}
 
 		// Show configs if tunnels exist
 		if len(cfg.Tunnels) > 0 {
@@ -137,6 +148,9 @@ func handleSystemUsers(ctx *actions.Context) error {
 
 		cfg.RemoveUser(username)
 
+		if cfg.Warp.Enabled {
+			proxy.RunAsUser = warp.SocksUser
+		}
 		if len(cfg.Users) > 0 {
 			first := cfg.Users[0]
 			_ = proxy.SetupSOCKSWithAuth(first.Username, first.Password)
@@ -149,6 +163,13 @@ func handleSystemUsers(ctx *actions.Context) error {
 		}
 
 		out.Success(fmt.Sprintf("User %q removed", username))
+
+		// Update WARP routing rules after removal
+		if cfg.Warp.Enabled {
+			if err := warp.RefreshRouting(cfg); err != nil {
+				out.Warning("Failed to update WARP routing: " + err.Error())
+			}
+		}
 	}
 
 	return nil

@@ -24,10 +24,10 @@ const (
 	SystemUsers     = "system.users"
 	QuickWizard     = "system.wizard"
 
+	// WARP actions
+	WarpToggle = "warp.toggle"
+
 	// Config actions
 	ConfigExport = "config.export"
 	ConfigImport = "config.import"
-
-	// Scanner actions
-	TunnelScan = "tunnel.scan"
 )

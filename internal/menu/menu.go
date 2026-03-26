@@ -57,6 +57,11 @@ func Run(cfg *config.Config, cfgErr error) error {
 				printError(err)
 			}
 			waitForEnter()
+		case "warp":
+			if err := runAction(actions.WarpToggle, cfg); err != nil {
+				printError(err)
+			}
+			waitForEnter()
 		case "install":
 			if err := runAction(actions.SystemInstall, cfg); err != nil {
 				printError(err)
@@ -92,9 +97,10 @@ func showMainMenu() (string, error) {
 	fmt.Println("  1) Quick Wizard")
 	fmt.Println("  2) Tunnels")
 	fmt.Println("  3) Users")
-	fmt.Println("  4) Install (advanced)")
-	fmt.Println("  5) Update")
-	fmt.Println("  6) Uninstall")
+	fmt.Println("  4) WARP")
+	fmt.Println("  5) Install (advanced)")
+	fmt.Println("  6) Update")
+	fmt.Println("  7) Uninstall")
 	fmt.Println("  0) Quit")
 	fmt.Print("\n  Choice: ")
 
@@ -110,11 +116,13 @@ func showMainMenu() (string, error) {
 		return "tunnels", nil
 	case "3", "users":
 		return "users", nil
-	case "4", "install":
+	case "4", "warp":
+		return "warp", nil
+	case "5", "install":
 		return "install", nil
-	case "5", "update":
+	case "6", "update":
 		return "update", nil
-	case "6", "uninstall":
+	case "7", "uninstall":
 		return "uninstall", nil
 	case "0", "q", "quit", "exit":
 		return "quit", nil
@@ -135,7 +143,6 @@ func tunnelMenu(cfg *config.Config) error {
 	fmt.Println("  6) Stop tunnel")
 	fmt.Println("  7) View logs")
 	fmt.Println("  8) Remove tunnel")
-	fmt.Println("  9) Scan resolvers")
 	fmt.Println("  0) Back")
 	fmt.Print("\n  Choice: ")
 
@@ -170,11 +177,6 @@ func tunnelMenu(cfg *config.Config) error {
 		waitForEnter()
 	case "8":
 		return runAction(actions.TunnelRemove, cfg)
-	case "9":
-		if err := runAction(actions.TunnelScan, cfg); err != nil {
-			return err
-		}
-		waitForEnter()
 	}
 	return nil
 }

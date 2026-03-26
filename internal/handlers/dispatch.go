@@ -40,7 +40,7 @@ func init() {
 	register(actions.SystemUninstall, handleSystemUninstall)
 	register(actions.SystemUpdate, handleSystemUpdate)
 	register(actions.SystemUsers, handleSystemUsers)
+	register(actions.WarpToggle, handleWarp)
 	register(actions.ConfigExport, handleConfigExport)
 	register(actions.ConfigImport, handleConfigImport)
-	register(actions.TunnelScan, handleTunnelScan)
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/anonvector/slipgate/internal/proxy"
 	"github.com/anonvector/slipgate/internal/system"
 	"github.com/anonvector/slipgate/internal/transport"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemInstall(ctx *actions.Context) error {
@@ -396,7 +397,6 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 
 	// Start DNS router to forward port 53 to internal tunnel ports.
-	// Also handles HMAC verification probes for the scanner.
 	if dnsTunnelCount > 0 {
 		network.FreePort(53, "udp")
 		out.Info("Starting DNS router...")
@@ -410,17 +410,30 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 
 	// ── Step 6: Create first user ──────────────────────────────────
-	out.Print("")
-	out.Print("  ── User Setup ──────────────────────────────────────")
-	out.Print("")
-
-	createUser, err := prompt.ConfirmYes("Create a user now?")
-	if err != nil {
-		return err
+	// Only offer user creation when at least one domain-based tunnel exists.
+	hasDomainTunnel := false
+	for _, t := range allTunnels {
+		if t.Domain != "" {
+			hasDomainTunnel = true
+			break
+		}
 	}
 
 	socksUser := ""
 	socksPass := ""
+	createUser := false
+
+	if hasDomainTunnel {
+		out.Print("")
+		out.Print("  ── User Setup ──────────────────────────────────────")
+		out.Print("")
+
+		var err error
+		createUser, err = prompt.ConfirmYes("Create a user now?")
+		if err != nil {
+			return err
+		}
+	}
 
 	if createUser {
 		username, err := prompt.String("Username", "user1")
@@ -466,6 +479,45 @@ func handleSystemInstall(ctx *actions.Context) error {
 		for i := range allTunnels {
 			if allTunnels[i].Transport == config.TransportNaive {
 				out.Info(fmt.Sprintf("Updating NaiveProxy %q with user credentials...", allTunnels[i].Tag))
+				if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
+					out.Warning(fmt.Sprintf("Failed to update %s: %s", allTunnels[i].Tag, err.Error()))
+				}
+			}
+		}
+	}
+
+	// ── Step 6b: WARP outbound (default off) ──────────────────────
+	out.Print("")
+	enableWarp, err := prompt.Confirm("Enable WARP outbound (Cloudflare)?")
+	if err != nil {
+		return err
+	}
+	if enableWarp {
+		out.Info("Setting up Cloudflare WARP...")
+		if err := warp.Setup(cfg); err != nil {
+			out.Warning("WARP setup failed: " + err.Error())
+		} else {
+			if err := warp.Enable(); err != nil {
+				out.Warning("Failed to start WARP: " + err.Error())
+			} else {
+				cfg.Warp.Enabled = true
+				if err := cfg.Save(); err != nil {
+					out.Warning("Failed to save config: " + err.Error())
+				}
+				out.Success("WARP enabled — tunnel user traffic routes through Cloudflare")
+			}
+		}
+	}
+
+	// Route SOCKS proxy traffic through WARP when enabled
+	if cfg.Warp.Enabled {
+		proxy.RunAsUser = warp.SocksUser
+
+		// Recreate NaiveProxy services so Caddy runs as the dedicated
+		// WARP user instead of root.
+		for i := range allTunnels {
+			if allTunnels[i].Transport == config.TransportNaive {
+				out.Info(fmt.Sprintf("Updating NaiveProxy %q for WARP routing...", allTunnels[i].Tag))
 				if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
 					out.Warning(fmt.Sprintf("Failed to update %s: %s", allTunnels[i].Tag, err.Error()))
 				}

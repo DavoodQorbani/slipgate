@@ -40,6 +40,12 @@ func init() {
 	})
 
 	Register(&Action{
+		ID:       WarpToggle,
+		Name:     "WARP",
+		Category: "system",
+	})
+
+	Register(&Action{
 		ID:       ConfigExport,
 		Name:     "Export Config",
 		Category: "config",
