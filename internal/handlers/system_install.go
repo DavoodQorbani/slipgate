@@ -93,7 +93,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 	needsSOCKSPort := false
 	for _, t := range transports {
 		switch t {
-		case config.TransportDNSTT, config.TransportSlipstream:
+		case config.TransportDNSTT, config.TransportSlipstream, config.TransportVayDNS:
 			needsDNS = true
 		case config.TransportNaive:
 			needsHTTPS = true
@@ -223,6 +223,11 @@ func handleSystemInstall(ctx *actions.Context) error {
 			domainDefault = "s." + knownParent
 		case selectedTransport == config.TransportSlipstream:
 			domainHint = "s.example.com"
+		case selectedTransport == config.TransportVayDNS && knownParent != "":
+			domainHint = "v." + knownParent
+			domainDefault = "v." + knownParent
+		case selectedTransport == config.TransportVayDNS:
+			domainHint = "v.example.com"
 		case selectedTransport == config.TransportDNSTT && knownParent != "":
 			domainHint = "t." + knownParent
 			domainDefault = "t." + knownParent
@@ -241,9 +246,9 @@ func handleSystemInstall(ctx *actions.Context) error {
 			knownParent = baseDomain(domain)
 		}
 
-		// Ask for MTU for DNSTT tunnels
+		// Ask for MTU for DNS tunnels
 		mtu := config.DefaultMTU
-		if selectedTransport == config.TransportDNSTT {
+		if selectedTransport == config.TransportDNSTT || selectedTransport == config.TransportVayDNS {
 			mtuStr, err := prompt.String("MTU", fmt.Sprintf("%d", config.DefaultMTU))
 			if err != nil {
 				return err
@@ -267,6 +272,8 @@ func handleSystemInstall(ctx *actions.Context) error {
 					sshHint := "ts." + parentDomain
 					if selectedTransport == config.TransportSlipstream {
 						sshHint = "ss." + parentDomain
+					} else if selectedTransport == config.TransportVayDNS {
+						sshHint = "vs." + parentDomain
 					}
 					sshDomain, err := prompt.String(fmt.Sprintf("Domain for %s", tag), sshHint)
 					if err != nil {
@@ -327,6 +334,33 @@ func handleSystemInstall(ctx *actions.Context) error {
 					}
 				}
 				tunnel.DNSTT = &config.DNSTTConfig{
+					MTU:        mtu,
+					PrivateKey: privKeyPath,
+					PublicKey:  sharedDNSTTKey,
+				}
+
+			case config.TransportVayDNS:
+				privKeyPath := filepath.Join(tunnelDir, "server.key")
+				pubKeyPath := filepath.Join(tunnelDir, "server.pub")
+
+				if sharedDNSTTKey == "" {
+					out.Info(fmt.Sprintf("Generating Curve25519 keypair for %s...", tunnelDomain))
+					pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
+					if err != nil {
+						return actions.NewError(actions.SystemInstall, "key generation failed", err)
+					}
+					sharedDNSTTKey = pubKey
+					out.Success(fmt.Sprintf("Public key: %s", pubKey))
+				} else {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+						return actions.NewError(actions.SystemInstall, "failed to copy private key", err)
+					}
+					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+						return actions.NewError(actions.SystemInstall, "failed to copy public key", err)
+					}
+				}
+				tunnel.VayDNS = &config.VayDNSConfig{
 					MTU:        mtu,
 					PrivateKey: privKeyPath,
 					PublicKey:  sharedDNSTTKey,
