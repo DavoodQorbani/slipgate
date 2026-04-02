@@ -7,28 +7,17 @@ import (
 	"github.com/anonvector/slipgate/internal/config"
 )
 
-// dnsttService holds the ExecStart and Environment for dnstt-server.
-type dnsttService struct {
-	execStart   string
-	environment []string
-}
-
-// buildDNSTTService builds the ExecStart and PT environment for noizdns dnstt-server.
-// Uses Tor Pluggable Transports protocol:
+// buildDNSTTExecStart builds the ExecStart command for dnstt-server.
 //
-//	TOR_PT_MANAGED_TRANSPORT_VER=1
-//	TOR_PT_SERVER_TRANSPORTS=dnstt
-//	TOR_PT_SERVER_BINDADDR=dnstt-LISTEN_ADDR:PORT
-//	TOR_PT_ORPORT=BACKEND_ADDR
-//	ExecStart=dnstt-server -privkey-file KEY -mtu MTU DOMAIN
-func buildDNSTTService(tunnel *config.TunnelConfig, cfg *config.Config) (*dnsttService, error) {
+//	dnstt-server -privkey-file KEY -mtu MTU DOMAIN LISTENADDR UPSTREAMADDR
+func buildDNSTTExecStart(tunnel *config.TunnelConfig, cfg *config.Config) (string, error) {
 	if tunnel.DNSTT == nil {
-		return nil, fmt.Errorf("dnstt config is nil")
+		return "", fmt.Errorf("dnstt config is nil")
 	}
 
 	backend := cfg.GetBackend(tunnel.Backend)
 	if backend == nil {
-		return nil, fmt.Errorf("backend %q not found", tunnel.Backend)
+		return "", fmt.Errorf("backend %q not found", tunnel.Backend)
 	}
 
 	binPath := filepath.Join(config.DefaultBinDir, "dnstt-server")
@@ -40,22 +29,12 @@ func buildDNSTTService(tunnel *config.TunnelConfig, cfg *config.Config) (*dnsttS
 		mtu = config.DefaultMTU
 	}
 
-	execStart := fmt.Sprintf("%s -privkey-file %s -mtu %d %s",
+	return fmt.Sprintf("%s -privkey-file %s -mtu %d %s %s %s",
 		binPath,
 		tunnel.DNSTT.PrivateKey,
 		mtu,
 		tunnel.Domain,
-	)
-
-	env := []string{
-		"TOR_PT_MANAGED_TRANSPORT_VER=1",
-		"TOR_PT_SERVER_TRANSPORTS=dnstt",
-		fmt.Sprintf("TOR_PT_SERVER_BINDADDR=dnstt-%s", listenAddr),
-		fmt.Sprintf("TOR_PT_ORPORT=%s", backend.Address),
-	}
-
-	return &dnsttService{
-		execStart:   execStart,
-		environment: env,
-	}, nil
+		listenAddr,
+		backend.Address,
+	), nil
 }

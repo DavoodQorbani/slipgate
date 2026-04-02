@@ -17,6 +17,11 @@ const (
 	SSHGroup          = "slipgate-ssh"
 )
 
+// WarpConfig tracks Cloudflare WARP outbound state.
+type WarpConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // Config is the top-level slipgate configuration.
 type Config struct {
 	mu       sync.RWMutex
@@ -26,6 +31,7 @@ type Config struct {
 	Backends []BackendConfig `json:"backends"`
 	Users    []UserConfig    `json:"users,omitempty"`
 	Route    RouteConfig     `json:"route"`
+	Warp     WarpConfig      `json:"warp,omitempty"`
 }
 
 // UserConfig tracks a managed user (same credentials for SSH + SOCKS).

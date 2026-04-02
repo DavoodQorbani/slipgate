@@ -1,13 +1,15 @@
 # SlipGate
 
-Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, NoizDNS, Slipstream) and HTTPS proxies (NaiveProxy) with systemd services, multi-tunnel DNS routing, and user management. Designed for use with the [SlipNet](https://github.com/anonvector/SlipNet) Android VPN app.
+Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, NoizDNS, Slipstream, VayDNS) and HTTPS proxies (NaiveProxy) with systemd services, multi-tunnel DNS routing, and user management. Designed for use with the [SlipNet](https://github.com/anonvector/SlipNet) Android VPN app.
 
 ## Features
 
-- **Multi-transport**: DNSTT/NoizDNS (DNS tunnels with Curve25519 encryption), Slipstream (QUIC-based DNS), NaiveProxy (HTTPS with Caddy)
+- **Multi-transport**: DNSTT/NoizDNS (DNS tunnels with Curve25519 encryption), Slipstream (QUIC-based DNS), VayDNS (KCP-based DNS with Curve25519), NaiveProxy (HTTPS with Caddy)
 - **Dual backend**: Built-in SOCKS5 proxy or SSH forwarding
 - **DNS routing**: Single-tunnel or multi-tunnel mode with domain-based dispatch
+- **WARP integration**: Optional Cloudflare WARP outbound routing (see [dnstun-ezpz](https://github.com/aleskxyz/dnstun-ezpz) for an alternative approach)
 - **User management**: Managed SSH + SOCKS credentials per user
+- **Live dashboard**: Real-time TUI with CPU, RAM, traffic sparklines, per-protocol connection stats, and tunnel status
 - **Interactive TUI + CLI**: Menu-driven setup or scriptable subcommands
 - **Systemd integration**: Service creation, lifecycle, and logs
 - **Auto-TLS**: Let's Encrypt via Caddy for NaiveProxy tunnels
@@ -73,10 +75,11 @@ slipgate uninstall              # Remove all services, configs, and binaries
 slipgate update                 # Self-update and restart all services
 slipgate restart                # Restart all services (DNS router, tunnels, SOCKS)
 slipgate users                  # Manage SSH/SOCKS users and view configs
+slipgate stats                  # Live dashboard (CPU, RAM, traffic, connections, tunnels)
 
 # Tunnel management
 slipgate tunnel add             # Add tunnel(s) — supports multi-select and "both" backend
-slipgate tunnel edit [tag]      # Edit tunnel settings (MTU)
+slipgate tunnel edit [tag]      # Edit tunnel settings (MTU, keys)
 slipgate tunnel remove [tag]    # Remove a tunnel
 slipgate tunnel start [tag]     # Start a tunnel
 slipgate tunnel stop [tag]      # Stop a tunnel
@@ -126,6 +129,13 @@ sudo slipgate tunnel add \
   --tag mydnstt \
   --domain t.example.com
 
+# VayDNS tunnel (KCP + Curve25519)
+sudo slipgate tunnel add \
+  --transport vaydns \
+  --backend socks \
+  --tag myvaydns \
+  --domain v.example.com
+
 # Slipstream tunnel
 sudo slipgate tunnel add \
   --transport slipstream \
@@ -149,6 +159,15 @@ sudo slipgate tunnel add --transport direct-socks5 --tag mysocks
 # Change MTU on a DNSTT tunnel
 sudo slipgate tunnel edit --tag mydnstt --mtu 1232
 
+# Tune VayDNS parameters
+sudo slipgate tunnel edit --tag myvaydns \
+  --mtu 1232 \
+  --record-type txt \
+  --idle-timeout 10s \
+  --keep-alive 2s \
+  --clientid-size 2 \
+  --queue-size 512
+
 # Share tunnel config as slipnet:// URI
 sudo slipgate tunnel share mydnstt
 ```
@@ -156,29 +175,34 @@ sudo slipgate tunnel share mydnstt
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                            SERVER                             │
-│                                                               │
-│  DNS (port 53)              HTTPS (port 443)                  │
-│       │                          │                            │
-│       v                          v                            │
-│  ┌──────────────────┐   ┌─────────────────┐                  │
-│  │    DNS Router     │   │ NaiveProxy      │                  │
-│  │ single/multi mode │   │ (Caddy + decoy) │                  │
-│  └──┬──────────┬─────┘   └────────┬────────┘                  │
-│     │          │                  │                            │
-│     v          v                  │                            │
-│  ┌──────────┐ ┌───────────┐      │                            │
-│  │DNSTT/Noiz│ │Slipstream │      │                            │
-│  └────┬─────┘ └─────┬─────┘      │                            │
-│       v             v             v                            │
-│  ┌──────────────────────────────────────────────────────┐     │
-│  │                     Backend                            │     │
-│  │              SOCKS5 (built-in) / SSH                   │     │
-│  └──────────────────────┬─────────────────────────────┘     │
-│                          v                                    │
-│                      Internet                                 │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                              SERVER                              │
+│                                                                  │
+│  DNS (port 53)                         HTTPS (port 443)          │
+│       │                                     │                    │
+│       v                                     v                    │
+│  ┌──────────────────┐              ┌─────────────────┐           │
+│  │    DNS Router     │              │ NaiveProxy      │           │
+│  │ single/multi mode │              │ (Caddy + decoy) │           │
+│  └──┬───────┬────┬───┘              └────────┬────────┘           │
+│     │       │    │                           │                    │
+│     v       v    v                           │                    │
+│  ┌──────┐ ┌────────────┐ ┌──────┐           │                    │
+│  │DNSTT/│ │Slipstream  │ │VayDNS│           │                    │
+│  │ Noiz │ │  (QUIC)    │ │(KCP) │           │                    │
+│  └──┬───┘ └─────┬──────┘ └──┬───┘           │                    │
+│     v           v            v               v                    │
+│  ┌───────────────────────────────────────────────────────────┐   │
+│  │                       Backend                              │   │
+│  │                SOCKS5 (built-in) / SSH                     │   │
+│  └───────────────────────┬───────────────────────────────────┘   │
+│                           v                                       │
+│                   ┌──────────────┐                                │
+│                   │ WARP (opt.)  │                                │
+│                   └──────┬───────┘                                │
+│                          v                                        │
+│                      Internet                                     │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ### Transport Types
@@ -187,6 +211,7 @@ sudo slipgate tunnel share mydnstt
 |-----------|----------|------|-------------|
 | **DNSTT/NoizDNS** | DNS | 53/udp | Curve25519 encrypted DNS tunnel. A single server serves both DNSTT and NoizDNS clients. NoizDNS adds DPI evasion with base36/hex encoding and CDN prefix stripping |
 | **Slipstream** | QUIC DNS | 53/udp | QUIC-based tunnel with certificate authentication |
+| **VayDNS** | KCP DNS | 53/udp | KCP-based DNS tunnel with Curve25519 encryption. Supports configurable idle timeout, keepalive, queue size, and multiple DNS record types |
 | **NaiveProxy** | HTTPS | 443/tcp | Caddy with forwardproxy plugin. Auto-TLS via Let's Encrypt. Probe-resistant with decoy site |
 
 ### Domain Layout
@@ -199,6 +224,8 @@ Each DNS tunnel instance requires its own subdomain. When using both SOCKS and S
 | dnstt-ssh | `ts.example.com` | SSH |
 | slipstream-socks | `s.example.com` | SOCKS5 |
 | slipstream-ssh | `ss.example.com` | SSH |
+| vaydns-socks | `v.example.com` | SOCKS5 |
+| vaydns-ssh | `vs.example.com` | SSH |
 | naive-socks | `example.com` | SOCKS5 (shared domain) |
 | naive-ssh | `example.com` | SSH (shared domain) |
 
@@ -212,6 +239,8 @@ NS  t.example.com        → ns.example.com
 NS  ts.example.com       → ns.example.com
 NS  s.example.com        → ns.example.com
 NS  ss.example.com       → ns.example.com
+NS  v.example.com        → ns.example.com
+NS  vs.example.com       → ns.example.com
 A   example.com           → <server IP>
 ```
 
@@ -239,6 +268,7 @@ This outputs a `slipnet://` URI that can be scanned or imported into the SlipNet
 | `/usr/local/bin/slipgate` | SlipGate binary (includes built-in SOCKS5 proxy) |
 | `/usr/local/bin/dnstt-server` | DNSTT transport binary |
 | `/usr/local/bin/slipstream-server` | Slipstream transport binary |
+| `/usr/local/bin/vaydns-server` | VayDNS transport binary |
 | `/usr/local/bin/caddy-naive` | Caddy with NaiveProxy plugin |
 
 ## Building
@@ -252,7 +282,7 @@ make release            # Build release binaries
 
 ## Credits
 
-Built on top of [dnstm](https://github.com/net2share/dnstm) by [net2share](https://github.com/net2share).
+Built on top of [dnstm](https://github.com/net2share/dnstm) and [vaydns](https://github.com/net2share/vaydns) by [net2share](https://github.com/net2share). WARP integration inspired by [dnstun-ezpz](https://github.com/aleskxyz/dnstun-ezpz).
 
 ## License
 

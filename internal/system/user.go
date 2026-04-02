@@ -128,6 +128,12 @@ func GeneratePassword(length int) string {
 }
 
 func ensureSSHMatchGroup() error {
+	const globalSettings = `
+# SlipGate global SSH settings
+MaxStartups 100:30:300
+MaxSessions 100
+TCPKeepAlive no
+`
 	const matchBlock = `
 # SlipGate SSH tunnel users
 Match Group slipgate-ssh
@@ -135,29 +141,76 @@ Match Group slipgate-ssh
     X11Forwarding no
     AllowAgentForwarding no
     ForceCommand /bin/false
+    ClientAliveInterval 30
+    ClientAliveCountMax 10
 `
 	data, err := os.ReadFile("/etc/ssh/sshd_config")
 	if err != nil {
 		return err
 	}
 
-	if strings.Contains(string(data), "Match Group slipgate-ssh") {
-		return nil
+	content := string(data)
+	changed := false
+
+	// Ensure global settings are present (must be before any Match block)
+	if !strings.Contains(content, "# SlipGate global SSH settings") {
+		// Insert before the first Match block or SlipGate block, or append
+		if idx := strings.Index(content, "# SlipGate SSH tunnel users"); idx >= 0 {
+			content = content[:idx] + globalSettings + "\n" + content[idx:]
+		} else if idx := strings.Index(content, "\nMatch "); idx >= 0 {
+			content = content[:idx] + globalSettings + content[idx:]
+		} else {
+			content += globalSettings
+		}
+		changed = true
 	}
 
-	f, err := os.OpenFile("/etc/ssh/sshd_config", os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
+	// If the Match block exists but lacks keepalive settings, replace it
+	if strings.Contains(content, "Match Group slipgate-ssh") {
+		if strings.Contains(content, "ClientAliveInterval") && !changed {
+			return nil // already up to date
+		}
+		// Remove the old Match block and fall through to re-append
+		if idx := strings.Index(content, "# SlipGate SSH tunnel users"); idx >= 0 {
+			content = strings.TrimRight(content[:idx], "\n") + "\n"
+			changed = true
+		} else if !changed {
+			return nil // can't safely remove, skip
+		}
 	}
-	defer f.Close()
 
-	if _, err := f.WriteString(matchBlock); err != nil {
-		return err
+	if changed {
+		if err := os.WriteFile("/etc/ssh/sshd_config", []byte(content), 0644); err != nil {
+			return err
+		}
 	}
 
-	// Try "sshd" (RHEL/CentOS) first, then "ssh" (Debian/Ubuntu)
-	if err := run("systemctl", "reload", "sshd"); err != nil {
-		return run("systemctl", "reload", "ssh")
+	// Append Match block if not present
+	if !strings.Contains(content, "Match Group slipgate-ssh") {
+		f, err := os.OpenFile("/etc/ssh/sshd_config", os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		if _, err := f.WriteString(matchBlock); err != nil {
+			return err
+		}
+	}
+
+	// Validate config before restarting
+	if err := run("sshd", "-t"); err != nil {
+		return fmt.Errorf("sshd config validation failed: %w", err)
+	}
+
+	// Try reload first, fall back to restart (needed on Ubuntu 24.04+ with socket activation)
+	for _, svc := range []string{"sshd", "ssh"} {
+		if exec.Command("systemctl", "is-active", svc+".service").Run() == nil {
+			if err := run("systemctl", "reload", svc); err == nil {
+				return nil
+			}
+			return run("systemctl", "restart", svc)
+		}
 	}
 	return nil
 }

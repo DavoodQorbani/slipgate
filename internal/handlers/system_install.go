@@ -19,6 +19,7 @@ import (
 	"github.com/anonvector/slipgate/internal/proxy"
 	"github.com/anonvector/slipgate/internal/system"
 	"github.com/anonvector/slipgate/internal/transport"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemInstall(ctx *actions.Context) error {
@@ -92,7 +93,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 	needsSOCKSPort := false
 	for _, t := range transports {
 		switch t {
-		case config.TransportDNSTT, config.TransportSlipstream:
+		case config.TransportDNSTT, config.TransportSlipstream, config.TransportVayDNS:
 			needsDNS = true
 		case config.TransportNaive:
 			needsHTTPS = true
@@ -171,6 +172,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 
 	// Walk through each installed transport
+	knownParent := "" // reuse parent domain from the first tunnel for subsequent hints
 	for tIdx, selectedTransport := range transports {
 		displayName := selectedTransport
 		if selectedTransport == config.TransportDNSTT {
@@ -208,14 +210,31 @@ func handleSystemInstall(ctx *actions.Context) error {
 			continue
 		}
 
-		// Ask for domain
-		domainHint := "t.example.com"
-		if selectedTransport == config.TransportNaive {
+		// Ask for domain — reuse the parent domain from a previous tunnel if available
+		var domainHint, domainDefault string
+		switch {
+		case selectedTransport == config.TransportNaive && knownParent != "":
+			domainHint = knownParent
+			domainDefault = knownParent
+		case selectedTransport == config.TransportNaive:
 			domainHint = "example.com"
-		} else if selectedTransport == config.TransportSlipstream {
+		case selectedTransport == config.TransportSlipstream && knownParent != "":
+			domainHint = "s." + knownParent
+			domainDefault = "s." + knownParent
+		case selectedTransport == config.TransportSlipstream:
 			domainHint = "s.example.com"
+		case selectedTransport == config.TransportVayDNS && knownParent != "":
+			domainHint = "v." + knownParent
+			domainDefault = "v." + knownParent
+		case selectedTransport == config.TransportVayDNS:
+			domainHint = "v.example.com"
+		case selectedTransport == config.TransportDNSTT && knownParent != "":
+			domainHint = "t." + knownParent
+			domainDefault = "t." + knownParent
+		default:
+			domainHint = "t.example.com"
 		}
-		domain, err := prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", displayName, domainHint), "")
+		domain, err := prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", displayName, domainHint), domainDefault)
 		if err != nil {
 			return err
 		}
@@ -223,10 +242,13 @@ func handleSystemInstall(ctx *actions.Context) error {
 			out.Warning(fmt.Sprintf("Skipping %s (no domain)", displayName))
 			continue
 		}
+		if knownParent == "" {
+			knownParent = baseDomain(domain)
+		}
 
-		// Ask for MTU for DNSTT tunnels
+		// Ask for MTU for DNS tunnels
 		mtu := config.DefaultMTU
-		if selectedTransport == config.TransportDNSTT {
+		if selectedTransport == config.TransportDNSTT || selectedTransport == config.TransportVayDNS {
 			mtuStr, err := prompt.String("MTU", fmt.Sprintf("%d", config.DefaultMTU))
 			if err != nil {
 				return err
@@ -238,6 +260,19 @@ func handleSystemInstall(ctx *actions.Context) error {
 
 		var sharedNaive *config.NaiveConfig
 		var sharedDNSTTKey string // reuse same keypair for both backends
+		var sharedRecordType string
+
+		if selectedTransport == config.TransportVayDNS {
+			rtOpts := make([]actions.SelectOption, len(config.ValidVayDNSRecordTypes))
+			for i, rt := range config.ValidVayDNSRecordTypes {
+				rtOpts[i] = actions.SelectOption{Value: rt, Label: rt}
+			}
+			var err error
+			sharedRecordType, err = prompt.Select("DNS record type", rtOpts)
+			if err != nil {
+				return err
+			}
+		}
 
 			for bIdx, b := range backends {
 			tag := selectedTransport
@@ -250,6 +285,8 @@ func handleSystemInstall(ctx *actions.Context) error {
 					sshHint := "ts." + parentDomain
 					if selectedTransport == config.TransportSlipstream {
 						sshHint = "ss." + parentDomain
+					} else if selectedTransport == config.TransportVayDNS {
+						sshHint = "vs." + parentDomain
 					}
 					sshDomain, err := prompt.String(fmt.Sprintf("Domain for %s", tag), sshHint)
 					if err != nil {
@@ -313,6 +350,34 @@ func handleSystemInstall(ctx *actions.Context) error {
 					MTU:        mtu,
 					PrivateKey: privKeyPath,
 					PublicKey:  sharedDNSTTKey,
+				}
+
+			case config.TransportVayDNS:
+				privKeyPath := filepath.Join(tunnelDir, "server.key")
+				pubKeyPath := filepath.Join(tunnelDir, "server.pub")
+
+				if sharedDNSTTKey == "" {
+					out.Info(fmt.Sprintf("Generating Curve25519 keypair for %s...", tunnelDomain))
+					pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
+					if err != nil {
+						return actions.NewError(actions.SystemInstall, "key generation failed", err)
+					}
+					sharedDNSTTKey = pubKey
+					out.Success(fmt.Sprintf("Public key: %s", pubKey))
+				} else {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+						return actions.NewError(actions.SystemInstall, "failed to copy private key", err)
+					}
+					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+						return actions.NewError(actions.SystemInstall, "failed to copy public key", err)
+					}
+				}
+				tunnel.VayDNS = &config.VayDNSConfig{
+					MTU:        mtu,
+					PrivateKey: privKeyPath,
+					PublicKey:  sharedDNSTTKey,
+					RecordType: sharedRecordType,
 				}
 
 			case config.TransportSlipstream:
@@ -396,7 +461,6 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 
 	// Start DNS router to forward port 53 to internal tunnel ports.
-	// Also handles HMAC verification probes for the scanner.
 	if dnsTunnelCount > 0 {
 		network.FreePort(53, "udp")
 		out.Info("Starting DNS router...")
@@ -410,17 +474,30 @@ func handleSystemInstall(ctx *actions.Context) error {
 	}
 
 	// ── Step 6: Create first user ──────────────────────────────────
-	out.Print("")
-	out.Print("  ── User Setup ──────────────────────────────────────")
-	out.Print("")
-
-	createUser, err := prompt.ConfirmYes("Create a user now?")
-	if err != nil {
-		return err
+	// Only offer user creation when at least one domain-based tunnel exists.
+	hasDomainTunnel := false
+	for _, t := range allTunnels {
+		if t.Domain != "" {
+			hasDomainTunnel = true
+			break
+		}
 	}
 
 	socksUser := ""
 	socksPass := ""
+	createUser := false
+
+	if hasDomainTunnel {
+		out.Print("")
+		out.Print("  ── User Setup ──────────────────────────────────────")
+		out.Print("")
+
+		var err error
+		createUser, err = prompt.ConfirmYes("Create a user now?")
+		if err != nil {
+			return err
+		}
+	}
 
 	if createUser {
 		username, err := prompt.String("Username", "user1")
@@ -466,6 +543,45 @@ func handleSystemInstall(ctx *actions.Context) error {
 		for i := range allTunnels {
 			if allTunnels[i].Transport == config.TransportNaive {
 				out.Info(fmt.Sprintf("Updating NaiveProxy %q with user credentials...", allTunnels[i].Tag))
+				if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
+					out.Warning(fmt.Sprintf("Failed to update %s: %s", allTunnels[i].Tag, err.Error()))
+				}
+			}
+		}
+	}
+
+	// ── Step 6b: WARP outbound (default off) ──────────────────────
+	out.Print("")
+	enableWarp, err := prompt.Confirm("Enable WARP outbound (Cloudflare)?")
+	if err != nil {
+		return err
+	}
+	if enableWarp {
+		out.Info("Setting up Cloudflare WARP...")
+		if err := warp.Setup(cfg, func(msg string) { out.Info(msg) }); err != nil {
+			out.Warning("WARP setup failed: " + err.Error())
+		} else {
+			if err := warp.Enable(); err != nil {
+				out.Warning("Failed to start WARP: " + err.Error())
+			} else {
+				cfg.Warp.Enabled = true
+				if err := cfg.Save(); err != nil {
+					out.Warning("Failed to save config: " + err.Error())
+				}
+				out.Success("WARP enabled — tunnel user traffic routes through Cloudflare")
+			}
+		}
+	}
+
+	// Route SOCKS proxy traffic through WARP when enabled
+	if cfg.Warp.Enabled {
+		proxy.RunAsUser = warp.SocksUser
+
+		// Recreate NaiveProxy services so Caddy runs as the dedicated
+		// WARP user instead of root.
+		for i := range allTunnels {
+			if allTunnels[i].Transport == config.TransportNaive {
+				out.Info(fmt.Sprintf("Updating NaiveProxy %q for WARP routing...", allTunnels[i].Tag))
 				if err := transport.CreateService(&allTunnels[i], cfg); err != nil {
 					out.Warning(fmt.Sprintf("Failed to update %s: %s", allTunnels[i].Tag, err.Error()))
 				}

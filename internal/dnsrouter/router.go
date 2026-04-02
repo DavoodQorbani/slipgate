@@ -282,6 +282,20 @@ func Serve(cfgInterface interface{}) error {
 				r.AddVerifyRoute(tunnel.Domain, pubkey, mtu)
 				log.Printf("verify: %s (HMAC via pubkey, mtu=%d)", tunnel.Domain, mtu)
 			}
+		case config.TransportVayDNS:
+			if tunnel.VayDNS != nil && tunnel.VayDNS.PublicKey != "" {
+				pubkey, err := loadPubkey(tunnel.VayDNS.PublicKey)
+				if err != nil {
+					log.Printf("verify: skip %s: %v", tunnel.Tag, err)
+					continue
+				}
+				mtu := tunnel.VayDNS.MTU
+				if mtu == 0 {
+					mtu = config.DefaultMTU
+				}
+				r.AddVerifyRoute(tunnel.Domain, pubkey, mtu)
+				log.Printf("verify: %s (HMAC via pubkey, mtu=%d)", tunnel.Domain, mtu)
+			}
 		case config.TransportSlipstream:
 			if tunnel.Slipstream != nil && tunnel.Slipstream.Cert != "" {
 				hmacKey, err := certToHMACKey(tunnel.Slipstream.Cert)

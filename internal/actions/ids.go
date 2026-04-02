@@ -23,12 +23,13 @@ const (
 	SystemUpdate    = "system.update"
 	SystemRestart   = "system.restart"
 	SystemUsers     = "system.users"
+	SystemStats     = "system.stats"
 	QuickWizard     = "system.wizard"
+
+	// WARP actions
+	WarpToggle = "warp.toggle"
 
 	// Config actions
 	ConfigExport = "config.export"
 	ConfigImport = "config.import"
-
-	// Scanner actions
-	TunnelScan = "tunnel.scan"
 )

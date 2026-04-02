@@ -18,20 +18,70 @@ import (
 
 var httpClient = &http.Client{Timeout: 120 * time.Second}
 
-const (
-	releaseBaseURL = "https://github.com/anonvector/slipgate/releases"
-	binaryBaseURL  = "https://github.com/anonvector/slipgate/releases/latest/download"
-)
+const releaseBaseURL = "https://github.com/anonvector/slipgate/releases"
 
 // OfflineDir, when set, makes EnsureInstalled copy binaries from this
 // directory instead of downloading. Used for SCP/offline installs.
 var OfflineDir string
 
-// Binary download URLs — all hosted on slipgate releases.
-var binaryURLs = map[string]string{
-	"dnstt-server":      binaryBaseURL + "/dnstt-server-%s-%s",
-	"slipstream-server": binaryBaseURL + "/slipstream-server-%s-%s",
-	"caddy-naive":       binaryBaseURL + "/caddy-naive-%s-%s",
+const (
+	stableDownloadBase = releaseBaseURL + "/latest/download"
+	repoAPI            = "https://api.github.com/repos/anonvector/slipgate/releases"
+)
+
+// DownloadBase returns the base URL for slipgate binary downloads.
+// Dev builds prefer the latest dev release; if none exists, fall back
+// to the latest stable release. Production builds always use stable.
+func DownloadBase() string {
+	if version.ReleaseTag != "" {
+		// Prefer latest dev release
+		if tag := latestDevTag(); tag != "" {
+			return releaseBaseURL + "/download/" + tag
+		}
+		// No dev release found — fall back to latest stable
+		return stableDownloadBase
+	}
+	return stableDownloadBase
+}
+
+// latestDevTag queries GitHub for the most recent dev-* pre-release tag.
+func latestDevTag() string {
+	resp, err := httpClient.Get(repoAPI + "?per_page=10")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	var releases []struct {
+		TagName string `json:"tag_name"`
+	}
+	if json.Unmarshal(body, &releases) != nil {
+		return ""
+	}
+	for _, r := range releases {
+		if strings.HasPrefix(r.TagName, "dev-") {
+			return r.TagName
+		}
+	}
+	return ""
+}
+
+// binaryURLTemplates returns download URL templates for transport binaries.
+// Transport binaries always come from the latest stable release regardless
+// of dev/stable channel — they are not included in dev pre-releases.
+func binaryURLTemplates() map[string]string {
+	return map[string]string{
+		"dnstt-server":      stableDownloadBase + "/dnstt-server-%s-%s",
+		"slipstream-server": stableDownloadBase + "/slipstream-server-%s-%s",
+		"vaydns-server":     "https://github.com/net2share/vaydns/releases/download/v0.2.7/vaydns-server-%s-%s",
+		"caddy-naive":       stableDownloadBase + "/caddy-naive-%s-%s",
+	}
 }
 
 // EnsureInstalled checks if a binary exists. If not, copies from OfflineDir
@@ -48,7 +98,7 @@ func EnsureInstalled(name string) error {
 	}
 
 	// Online mode: download from releases
-	urlTemplate, ok := binaryURLs[name]
+	urlTemplate, ok := binaryURLTemplates()[name]
 	if !ok {
 		return fmt.Errorf("unknown binary: %s", name)
 	}
@@ -90,8 +140,17 @@ func installFromOffline(name, destPath string) error {
 }
 
 // CheckUpdate checks GitHub releases for a newer version.
+// Dev builds prefer the latest dev release; stable builds check latest stable.
 func CheckUpdate() (newVersion string, downloadURL string, err error) {
-	apiURL := "https://api.github.com/repos/anonvector/slipgate/releases/latest"
+	apiURL := repoAPI + "/latest"
+	if version.ReleaseTag != "" {
+		if tag := latestDevTag(); tag != "" {
+			apiURL = repoAPI + "/tags/" + tag
+		} else {
+			// No dev release — check stable
+			apiURL = repoAPI + "/latest"
+		}
+	}
 	resp, err := httpClient.Get(apiURL)
 	if err != nil {
 		return "", "", err

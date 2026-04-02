@@ -15,15 +15,16 @@ import (
 	"github.com/anonvector/slipgate/internal/service"
 	"github.com/anonvector/slipgate/internal/transport"
 	"github.com/anonvector/slipgate/internal/version"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemUpdate(ctx *actions.Context) error {
 	out := ctx.Output
 	out.Info("Current version: " + version.String())
-	out.Info("Downloading latest slipgate...")
 
-	downloadURL := fmt.Sprintf("%s/latest/download/slipgate-%s-%s",
-		"https://github.com/anonvector/slipgate/releases", runtime.GOOS, runtime.GOARCH)
+	base := binary.DownloadBase()
+	downloadURL := fmt.Sprintf("%s/slipgate-%s-%s", base, runtime.GOOS, runtime.GOARCH)
+	out.Info("Downloading from: " + downloadURL)
 
 	tmpPath, err := binary.Download(downloadURL)
 	if err != nil {
@@ -52,7 +53,7 @@ func handleSystemUpdate(ctx *actions.Context) error {
 	out.Print("")
 	out.Info("Updating transport binaries...")
 
-	transportBins := []string{"dnstt-server", "slipstream-server", "caddy-naive"}
+	transportBins := []string{"dnstt-server", "slipstream-server", "vaydns-server", "caddy-naive"}
 	for _, name := range transportBins {
 		binPath := filepath.Join(config.DefaultBinDir, name)
 		if _, err := os.Stat(binPath); os.IsNotExist(err) {
@@ -90,6 +91,9 @@ func handleSystemUpdate(ctx *actions.Context) error {
 			pass = cfg.Users[0].Password
 		}
 
+		if cfg.Warp.Enabled {
+			proxy.RunAsUser = warp.SocksUser
+		}
 		var setupErr error
 		if directSOCKS {
 			setupErr = proxy.SetupSOCKSExternal(user, pass)
@@ -106,9 +110,22 @@ func handleSystemUpdate(ctx *actions.Context) error {
 		}
 	}
 
+	// Re-apply cap_net_bind_service to caddy-naive if WARP is enabled,
+	// since the capability is lost when the binary is replaced.
+	{
+		cfg := ctx.Config.(*config.Config)
+		if cfg.Warp.Enabled {
+			naivePath := filepath.Join(config.DefaultBinDir, "caddy-naive")
+			if _, err := os.Stat(naivePath); err == nil {
+				if err := exec.Command("setcap", "cap_net_bind_service=+ep", naivePath).Run(); err != nil {
+					out.Warning("Failed to re-set caddy-naive capability: " + err.Error())
+				}
+			}
+		}
+	}
+
 	// Regenerate and restart all tunnel services
-	// This ensures systemd unit files match the current binary interface
-	// (e.g. PT environment variables for noizdns dnstt-server).
+	// This ensures systemd unit files match the current binary interface.
 	out.Print("")
 	out.Info("Regenerating services...")
 	cfg := ctx.Config.(*config.Config)
@@ -122,16 +139,19 @@ func handleSystemUpdate(ctx *actions.Context) error {
 			break
 		}
 	}
-	// Restart socks5 first (ready for tunnels when they come back)
-	if service.Exists("slipgate-socks5") {
-		if err := service.Restart("slipgate-socks5"); err != nil {
-			out.Warning(fmt.Sprintf("Failed to restart slipgate-socks5: %v", err))
-		} else {
-			out.Success(fmt.Sprintf("  slipgate-socks5 restarted"))
+
+	// Restart infrastructure services first (DNS router needs port 53 before tunnels)
+	for _, svc := range []string{"slipgate-dnsrouter", "slipgate-socks5"} {
+		if service.Exists(svc) {
+			if err := service.Restart(svc); err != nil {
+				out.Warning(fmt.Sprintf("Failed to restart %s: %v", svc, err))
+			} else {
+				out.Success(fmt.Sprintf("  %s restarted", svc))
+			}
 		}
 	}
 
-	// Regenerate and restart tunnel services (socks5 is already fresh)
+	// Then regenerate and restart tunnel services
 	for i := range cfg.Tunnels {
 		t := &cfg.Tunnels[i]
 		if t.IsDirectTransport() {
@@ -151,16 +171,6 @@ func handleSystemUpdate(ctx *actions.Context) error {
 			out.Success(fmt.Sprintf("  %s regenerated and restarted", svcName))
 		} else {
 			out.Success(fmt.Sprintf("  %s regenerated", svcName))
-		}
-	}
-
-	// Restart dnsrouter last — it holds persistent UDP connections to tunnel
-	// backends, so it must restart after tunnels to get fresh connections.
-	if service.Exists("slipgate-dnsrouter") {
-		if err := service.Restart("slipgate-dnsrouter"); err != nil {
-			out.Warning(fmt.Sprintf("Failed to restart slipgate-dnsrouter: %v", err))
-		} else {
-			out.Success(fmt.Sprintf("  slipgate-dnsrouter restarted"))
 		}
 	}
 

@@ -30,8 +30,23 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 BINARY="slipgate-${OS}-${ARCH}"
 
-# Try GitHub release first, fall back to building from source
-URL="https://github.com/${REPO}/releases/latest/download/${BINARY}"
+# When fetched from the dev branch, find the latest dev-* pre-release;
+# otherwise use the latest stable release.
+# Can also be overridden: SLIPGATE_RELEASE_TAG=dev-abc1234 bash install.sh
+RELEASE_TAG="${SLIPGATE_RELEASE_TAG:-}"
+CHANNEL="dev"  # ← set to "dev" on dev branch, empty on main
+if [[ -z "$RELEASE_TAG" && "$CHANNEL" == "dev" ]]; then
+    {
+        RELEASE_TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" \
+            | grep -o '"tag_name": *"dev-[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    }
+fi
+
+if [[ -n "$RELEASE_TAG" ]]; then
+    URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${BINARY}"
+else
+    URL="https://github.com/${REPO}/releases/latest/download/${BINARY}"
+fi
 
 echo -e "${CYAN}"
 echo "   _____ _ _       _____       _       "

@@ -3,8 +3,9 @@ package version
 import "fmt"
 
 var (
-	Version = "1.3.1"
-	Commit  = "unknown"
+	Version    = "1.4.0"
+	Commit     = "unknown"
+	ReleaseTag = "" // set via ldflags for dev builds (e.g. "dev-abc1234")
 )
 
 func String() string {

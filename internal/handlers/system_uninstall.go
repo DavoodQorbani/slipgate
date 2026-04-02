@@ -8,6 +8,7 @@ import (
 	"github.com/anonvector/slipgate/internal/prompt"
 	"github.com/anonvector/slipgate/internal/service"
 	"github.com/anonvector/slipgate/internal/system"
+	"github.com/anonvector/slipgate/internal/warp"
 )
 
 func handleSystemUninstall(ctx *actions.Context) error {
@@ -42,6 +43,11 @@ func handleSystemUninstall(ctx *actions.Context) error {
 	_ = service.Stop("slipgate-microsocks")
 	_ = service.Remove("slipgate-microsocks")
 
+	// Stop WARP and remove its dedicated users
+	out.Info("Removing WARP...")
+	warp.Uninstall()
+	warp.RemoveUsers()
+
 	// Remove config directory
 	out.Info("Removing /etc/slipgate/...")
 	if err := os.RemoveAll(config.DefaultConfigDir); err != nil {
@@ -58,7 +64,7 @@ func handleSystemUninstall(ctx *actions.Context) error {
 	out.Info("Removing binaries...")
 	execPath, _ := os.Executable()
 	for _, bin := range []string{
-		"dnstt-server", "slipstream-server", "caddy-naive", "microsocks",
+		"dnstt-server", "slipstream-server", "vaydns-server", "caddy-naive", "microsocks",
 	} {
 		os.Remove(config.DefaultBinDir + "/" + bin)
 	}

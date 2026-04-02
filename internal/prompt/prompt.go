@@ -47,11 +47,19 @@ func Select(label string, options []actions.SelectOption) (string, error) {
 		fmt.Printf("    %d) %s\n", i+1, opt.Label)
 	}
 
-	line, err := readLine("  Choice: ")
+	defaultLabel := ""
+	if len(options) > 0 {
+		defaultLabel = options[0].Label
+	}
+	line, err := readLine(fmt.Sprintf("  Choice [%s]: ", defaultLabel))
 	if err != nil {
 		return "", err
 	}
 	line = sanitize(strings.TrimSpace(line))
+
+	if line == "" && len(options) > 0 {
+		return options[0].Value, nil
+	}
 
 	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(options) {
 		return options[n-1].Value, nil

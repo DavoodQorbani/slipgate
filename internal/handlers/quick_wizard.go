@@ -32,83 +32,125 @@ func handleQuickWizard(ctx *actions.Context) error {
 	out.Print("  ── Quick Wizard ────────────────────────────────────")
 	out.Print("")
 
-	// 1. Pick one transport
-	selectedTransport, err := prompt.Select("Transport", actions.TransportOptions)
+	// 1. Pick transports (multi-select)
+	selectedTransports, err := prompt.MultiSelect("Transports", actions.TransportOptions)
 	if err != nil {
 		return err
 	}
+	if len(selectedTransports) == 0 {
+		return actions.NewError(actions.QuickWizard, "at least one transport is required", nil)
+	}
 
-	isDirect := selectedTransport == config.TransportSSH || selectedTransport == config.TransportSOCKS
+	// 2. Collect per-transport settings
+	type transportSettings struct {
+		transport  string
+		backend    string
+		backends   []string
+		domain     string
+		mtu        int
+		recordType string
+		naiveEmail string
+		naiveDecoy string
+	}
+	var allSettings []transportSettings
 
-	// 2. Pick backend (skip for direct transports)
-	backend := ""
-	var backends []string
-	if isDirect {
-		if selectedTransport == config.TransportSSH {
-			backend = config.BackendSSH
+	for _, tr := range selectedTransports {
+		out.Print("")
+		out.Info(fmt.Sprintf("── %s settings ──", tr))
+
+		isDirect := tr == config.TransportSSH || tr == config.TransportSOCKS
+
+		var backend string
+		var backends []string
+		if isDirect {
+			if tr == config.TransportSSH {
+				backend = config.BackendSSH
+			} else {
+				backend = config.BackendSOCKS
+			}
+			backends = []string{backend}
 		} else {
-			backend = config.BackendSOCKS
+			backend, err = prompt.Select(fmt.Sprintf("Backend for %s", tr), actions.BackendOptions)
+			if err != nil {
+				return err
+			}
+			backends = []string{backend}
+			if backend == "both" {
+				backends = []string{config.BackendSOCKS, config.BackendSSH}
+			}
 		}
-		backends = []string{backend}
-	} else {
-		backend, err = prompt.Select("Backend", actions.BackendOptions)
-		if err != nil {
-			return err
+
+		domain := ""
+		if !isDirect {
+			domainHint := "t.example.com"
+			if tr == config.TransportNaive {
+				domainHint = "example.com"
+			} else if tr == config.TransportSlipstream {
+				domainHint = "s.example.com"
+			} else if tr == config.TransportVayDNS {
+				domainHint = "v.example.com"
+			}
+			displayName := tr
+			if tr == config.TransportDNSTT {
+				displayName = "dnstt/noizdns"
+			}
+			domain, err = prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", displayName, domainHint), "")
+			if err != nil {
+				return err
+			}
+			if domain == "" {
+				return actions.NewError(actions.QuickWizard, fmt.Sprintf("domain is required for %s", tr), nil)
+			}
 		}
-		backends = []string{backend}
-		if backend == "both" {
-			backends = []string{config.BackendSOCKS, config.BackendSSH}
+
+		mtu := config.DefaultMTU
+		if tr == config.TransportDNSTT || tr == config.TransportVayDNS {
+			mtuStr, err := prompt.String("MTU", fmt.Sprintf("%d", config.DefaultMTU))
+			if err != nil {
+				return err
+			}
+			if n, e := fmt.Sscanf(mtuStr, "%d", &mtu); n != 1 || e != nil {
+				mtu = config.DefaultMTU
+			}
 		}
+
+		var recordType string
+		if tr == config.TransportVayDNS {
+			rtOpts := make([]actions.SelectOption, len(config.ValidVayDNSRecordTypes))
+			for i, rt := range config.ValidVayDNSRecordTypes {
+				rtOpts[i] = actions.SelectOption{Value: rt, Label: rt}
+			}
+			recordType, err = prompt.Select("DNS record type", rtOpts)
+			if err != nil {
+				return err
+			}
+		}
+
+		var naiveEmail, naiveDecoy string
+		if tr == config.TransportNaive {
+			naiveEmail, err = prompt.String("Email (for Let's Encrypt)", "")
+			if err != nil {
+				return err
+			}
+			naiveDecoy, err = prompt.String("Decoy URL", config.RandomDecoyURL())
+			if err != nil {
+				return err
+			}
+		}
+
+		allSettings = append(allSettings, transportSettings{
+			transport:  tr,
+			backend:    backend,
+			backends:   backends,
+			domain:     domain,
+			mtu:        mtu,
+			recordType: recordType,
+			naiveEmail: naiveEmail,
+			naiveDecoy: naiveDecoy,
+		})
 	}
 
-	// 3. Ask for domain (skip for direct transports)
-	domain := ""
-	if !isDirect {
-		domainHint := "t.example.com"
-		if selectedTransport == config.TransportNaive {
-			domainHint = "example.com"
-		} else if selectedTransport == config.TransportSlipstream {
-			domainHint = "s.example.com"
-		}
-		displayName := selectedTransport
-		if selectedTransport == config.TransportDNSTT {
-			displayName = "dnstt/noizdns"
-		}
-		domain, err = prompt.String(fmt.Sprintf("Domain for %s (e.g. %s)", displayName, domainHint), "")
-		if err != nil {
-			return err
-		}
-		if domain == "" {
-			return actions.NewError(actions.QuickWizard, "domain is required", nil)
-		}
-	}
-
-	// 4. Ask for MTU (DNSTT only)
-	mtu := config.DefaultMTU
-	if selectedTransport == config.TransportDNSTT {
-		mtuStr, err := prompt.String("MTU", fmt.Sprintf("%d", config.DefaultMTU))
-		if err != nil {
-			return err
-		}
-		if n, e := fmt.Sscanf(mtuStr, "%d", &mtu); n != 1 || e != nil {
-			mtu = config.DefaultMTU
-		}
-	}
-
-	// 5. NaiveProxy fields
-	var naiveEmail, naiveDecoy string
-	if selectedTransport == config.TransportNaive {
-		naiveEmail, err = prompt.String("Email (for Let's Encrypt)", "")
-		if err != nil {
-			return err
-		}
-		naiveDecoy, err = prompt.String("Decoy URL", config.RandomDecoyURL())
-		if err != nil {
-			return err
-		}
-	}
-
-	// 6. Create user
+	// 3. Create user
 	out.Print("")
 	username, err := prompt.String("Username", "user1")
 	if err != nil {
@@ -137,33 +179,42 @@ func handleQuickWizard(ctx *actions.Context) error {
 		}
 	}
 
-	// Download binary
-	if bin, ok := config.TransportBinaries[selectedTransport]; ok {
-		out.Info(fmt.Sprintf("Downloading %s...", bin))
-		if err := binary.EnsureInstalled(bin); err != nil {
-			return actions.NewError(actions.QuickWizard, fmt.Sprintf("failed to download %s", bin), err)
+	// Download binaries
+	downloadedBins := make(map[string]bool)
+	for _, s := range allSettings {
+		if bin, ok := config.TransportBinaries[s.transport]; ok && !downloadedBins[bin] {
+			out.Info(fmt.Sprintf("Downloading %s...", bin))
+			if err := binary.EnsureInstalled(bin); err != nil {
+				return actions.NewError(actions.QuickWizard, fmt.Sprintf("failed to download %s", bin), err)
+			}
+			out.Success(fmt.Sprintf("%s ready", bin))
+			downloadedBins[bin] = true
 		}
-		out.Success(fmt.Sprintf("%s ready", bin))
 	}
 
 	// Firewall
-	switch selectedTransport {
-	case config.TransportDNSTT, config.TransportSlipstream:
-		_ = network.AllowPort(53, "udp")
-		_ = network.DisableResolvedStub()
-	case config.TransportNaive:
-		_ = network.AllowPort(80, "tcp")
-		_ = network.AllowPort(443, "tcp")
-	case config.TransportSSH:
-		_ = network.AllowPort(22, "tcp")
-	case config.TransportSOCKS:
-		_ = network.AllowPort(1080, "tcp")
+	for _, s := range allSettings {
+		switch s.transport {
+		case config.TransportDNSTT, config.TransportSlipstream, config.TransportVayDNS:
+			_ = network.AllowPort(53, "udp")
+			_ = network.DisableResolvedStub()
+		case config.TransportNaive:
+			_ = network.AllowPort(80, "tcp")
+			_ = network.AllowPort(443, "tcp")
+		case config.TransportSSH:
+			_ = network.AllowPort(22, "tcp")
+		case config.TransportSOCKS:
+			_ = network.AllowPort(1080, "tcp")
+		}
 	}
 
-	// Write default config
-	cfg := config.Default()
-	if err := cfg.Save(); err != nil {
-		return actions.NewError(actions.QuickWizard, "failed to write config", err)
+	// Load existing config or create defaults for fresh install
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Default()
+		if err := cfg.Save(); err != nil {
+			return actions.NewError(actions.QuickWizard, "failed to write config", err)
+		}
 	}
 
 	// ── Create tunnels ─────────────────────────────────────────
@@ -171,107 +222,139 @@ func handleQuickWizard(ctx *actions.Context) error {
 	needsSOCKS := false
 	var sharedDNSTTKey string
 
-	for _, b := range backends {
-		tag := selectedTransport
-		tunnelDomain := domain
+	for _, s := range allSettings {
+		for _, b := range s.backends {
+			tag := s.transport
+			tunnelDomain := s.domain
 
-		if backend == "both" {
-			tag = selectedTransport + "-" + b
-			if b == config.BackendSSH && selectedTransport != config.TransportNaive {
-				parentDomain := baseDomain(domain)
-				sshHint := "ts." + parentDomain
-				if selectedTransport == config.TransportSlipstream {
-					sshHint = "ss." + parentDomain
-				}
-				tunnelDomain, err = prompt.String(fmt.Sprintf("Domain for %s", tag), sshHint)
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		tunnel := config.TunnelConfig{
-			Tag:       tag,
-			Transport: selectedTransport,
-			Backend:   b,
-			Domain:    tunnelDomain,
-			Enabled:   true,
-		}
-
-		if tunnel.IsDNSTunnel() {
-			tunnel.Port = cfg.NextAvailablePort()
-			for _, existing := range allTunnels {
-				if existing.Port == tunnel.Port {
-					tunnel.Port++
+			if s.backend == "both" {
+				tag = s.transport + "-" + b
+				if b == config.BackendSSH && s.transport != config.TransportNaive {
+					parentDomain := baseDomain(s.domain)
+					sshHint := "ts." + parentDomain
+					if s.transport == config.TransportSlipstream {
+						sshHint = "ss." + parentDomain
+					} else if s.transport == config.TransportVayDNS {
+						sshHint = "vs." + parentDomain
+					}
+					tunnelDomain, err = prompt.String(fmt.Sprintf("Domain for %s", tag), sshHint)
+					if err != nil {
+						return err
+					}
 				}
 			}
-		}
 
-		if err := cfg.ValidateNewTunnel(&tunnel); err != nil {
-			out.Warning(fmt.Sprintf("Skip %s: %v", tag, err))
-			continue
-		}
+			tunnel := config.TunnelConfig{
+				Tag:       tag,
+				Transport: s.transport,
+				Backend:   b,
+				Domain:    tunnelDomain,
+				Enabled:   true,
+			}
 
-		tunnelDir := config.TunnelDir(tag)
-		if err := os.MkdirAll(tunnelDir, 0750); err != nil {
-			return actions.NewError(actions.QuickWizard, "failed to create tunnel dir", err)
-		}
-
-		switch selectedTransport {
-		case config.TransportDNSTT:
-			privKeyPath := filepath.Join(tunnelDir, "server.key")
-			pubKeyPath := filepath.Join(tunnelDir, "server.pub")
-
-			if sharedDNSTTKey == "" {
-				out.Info(fmt.Sprintf("Generating keypair for %s...", tunnelDomain))
-				pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
-				if err != nil {
-					return actions.NewError(actions.QuickWizard, "key generation failed", err)
-				}
-				sharedDNSTTKey = pubKey
-				out.Success(fmt.Sprintf("Public key: %s", pubKey))
-			} else {
-				srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
-				if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
-					return actions.NewError(actions.QuickWizard, "failed to copy private key", err)
-				}
-				if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
-					return actions.NewError(actions.QuickWizard, "failed to copy public key", err)
+			if tunnel.IsDNSTunnel() {
+				tunnel.Port = cfg.NextAvailablePort()
+				for _, existing := range allTunnels {
+					if existing.Port == tunnel.Port {
+						tunnel.Port++
+					}
 				}
 			}
-			tunnel.DNSTT = &config.DNSTTConfig{
-				MTU:        mtu,
-				PrivateKey: privKeyPath,
-				PublicKey:  sharedDNSTTKey,
+
+			if err := cfg.ValidateNewTunnel(&tunnel); err != nil {
+				out.Warning(fmt.Sprintf("Skip %s: %v", tag, err))
+				continue
 			}
 
-		case config.TransportSlipstream:
-			certPath := filepath.Join(tunnelDir, "cert.pem")
-			keyPath := filepath.Join(tunnelDir, "key.pem")
-			out.Info(fmt.Sprintf("Generating certificate for %s...", tunnelDomain))
-			if err := certs.GenerateSelfSigned(certPath, keyPath, tunnelDomain); err != nil {
-				return actions.NewError(actions.QuickWizard, "certificate generation failed", err)
-			}
-			tunnel.Slipstream = &config.SlipstreamConfig{
-				Cert: certPath,
-				Key:  keyPath,
+			tunnelDir := config.TunnelDir(tag)
+			if err := os.MkdirAll(tunnelDir, 0750); err != nil {
+				return actions.NewError(actions.QuickWizard, "failed to create tunnel dir", err)
 			}
 
-		case config.TransportNaive:
-			tunnel.Naive = &config.NaiveConfig{
-				Email:    naiveEmail,
-				DecoyURL: naiveDecoy,
-				User:     username,
-				Password: password,
-				Port:     443,
+			switch s.transport {
+			case config.TransportDNSTT:
+				privKeyPath := filepath.Join(tunnelDir, "server.key")
+				pubKeyPath := filepath.Join(tunnelDir, "server.pub")
+
+				if sharedDNSTTKey == "" {
+					out.Info(fmt.Sprintf("Generating keypair for %s...", tunnelDomain))
+					pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
+					if err != nil {
+						return actions.NewError(actions.QuickWizard, "key generation failed", err)
+					}
+					sharedDNSTTKey = pubKey
+					out.Success(fmt.Sprintf("Public key: %s", pubKey))
+				} else {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+						return actions.NewError(actions.QuickWizard, "failed to copy private key", err)
+					}
+					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+						return actions.NewError(actions.QuickWizard, "failed to copy public key", err)
+					}
+				}
+				tunnel.DNSTT = &config.DNSTTConfig{
+					MTU:        s.mtu,
+					PrivateKey: privKeyPath,
+					PublicKey:  sharedDNSTTKey,
+				}
+
+			case config.TransportVayDNS:
+				privKeyPath := filepath.Join(tunnelDir, "server.key")
+				pubKeyPath := filepath.Join(tunnelDir, "server.pub")
+
+				if sharedDNSTTKey == "" {
+					out.Info(fmt.Sprintf("Generating keypair for %s...", tunnelDomain))
+					pubKey, err := keys.GenerateDNSTTKeys(privKeyPath, pubKeyPath)
+					if err != nil {
+						return actions.NewError(actions.QuickWizard, "key generation failed", err)
+					}
+					sharedDNSTTKey = pubKey
+					out.Success(fmt.Sprintf("Public key: %s", pubKey))
+				} else {
+					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
+					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+						return actions.NewError(actions.QuickWizard, "failed to copy private key", err)
+					}
+					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+						return actions.NewError(actions.QuickWizard, "failed to copy public key", err)
+					}
+				}
+				tunnel.VayDNS = &config.VayDNSConfig{
+					MTU:        s.mtu,
+					PrivateKey: privKeyPath,
+					PublicKey:  sharedDNSTTKey,
+					RecordType: s.recordType,
+				}
+
+			case config.TransportSlipstream:
+				certPath := filepath.Join(tunnelDir, "cert.pem")
+				keyPath := filepath.Join(tunnelDir, "key.pem")
+				out.Info(fmt.Sprintf("Generating certificate for %s...", tunnelDomain))
+				if err := certs.GenerateSelfSigned(certPath, keyPath, tunnelDomain); err != nil {
+					return actions.NewError(actions.QuickWizard, "certificate generation failed", err)
+				}
+				tunnel.Slipstream = &config.SlipstreamConfig{
+					Cert: certPath,
+					Key:  keyPath,
+				}
+
+			case config.TransportNaive:
+				tunnel.Naive = &config.NaiveConfig{
+					Email:    s.naiveEmail,
+					DecoyURL: s.naiveDecoy,
+					User:     username,
+					Password: password,
+					Port:     443,
+				}
 			}
-		}
 
-		cfg.AddTunnel(tunnel)
-		allTunnels = append(allTunnels, tunnel)
+			cfg.AddTunnel(tunnel)
+			allTunnels = append(allTunnels, tunnel)
 
-		if b == config.BackendSOCKS && selectedTransport != config.TransportNaive {
-			needsSOCKS = true
+			if b == config.BackendSOCKS && s.transport != config.TransportNaive {
+				needsSOCKS = true
+			}
 		}
 	}
 
@@ -294,8 +377,16 @@ func handleQuickWizard(ctx *actions.Context) error {
 	}
 	out.Success(fmt.Sprintf("User %q created", username))
 
+	// Check if any transport is direct SOCKS
+	hasDirectSOCKS := false
+	for _, s := range allSettings {
+		if s.transport == config.TransportSOCKS {
+			hasDirectSOCKS = true
+		}
+	}
+
 	// Kill anything holding port 1080 before starting our SOCKS5 proxy
-	if needsSOCKS || (isDirect && selectedTransport == config.TransportSOCKS) {
+	if needsSOCKS || hasDirectSOCKS {
 		network.FreePort(1080, "tcp")
 	}
 
@@ -305,7 +396,7 @@ func handleQuickWizard(ctx *actions.Context) error {
 			out.Warning("Failed to setup SOCKS5 proxy: " + err.Error())
 		}
 	}
-	if isDirect && selectedTransport == config.TransportSOCKS {
+	if hasDirectSOCKS {
 		if err := proxy.SetupSOCKSExternal(username, password); err != nil {
 			out.Warning("Failed to setup SOCKS5 proxy: " + err.Error())
 		}
@@ -363,6 +454,9 @@ func handleQuickWizard(ctx *actions.Context) error {
 	if allTunnels[0].DNSTT != nil {
 		out.Print(fmt.Sprintf("    PubKey : %s", allTunnels[0].DNSTT.PublicKey))
 		out.Print(fmt.Sprintf("    MTU    : %d", allTunnels[0].DNSTT.MTU))
+	} else if allTunnels[0].VayDNS != nil {
+		out.Print(fmt.Sprintf("    PubKey : %s", allTunnels[0].VayDNS.PublicKey))
+		out.Print(fmt.Sprintf("    MTU    : %d", allTunnels[0].VayDNS.MTU))
 	}
 
 	// DNS records
