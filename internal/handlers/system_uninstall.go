@@ -23,25 +23,19 @@ func handleSystemUninstall(ctx *actions.Context) error {
 		return nil
 	}
 
-	cfg := ctx.Config.(*config.Config)
-
-	// Stop and remove all tunnel services
-	for _, t := range cfg.Tunnels {
-		svcName := service.TunnelServiceName(t.Tag)
+	// Stop and remove ALL slipgate services (config + any orphaned ones)
+	for _, svcName := range service.ListSlipgateServices() {
 		out.Info("Stopping " + svcName + "...")
 		_ = service.Stop(svcName)
 		_ = service.Remove(svcName)
 	}
 
-	// Stop DNS router
-	_ = service.Stop("slipgate-dnsrouter")
-	_ = service.Remove("slipgate-dnsrouter")
-
-	// Stop SOCKS5 proxy (handles both old and new service names)
-	_ = service.Stop("slipgate-socks5")
-	_ = service.Remove("slipgate-socks5")
+	// Also clean up legacy microsocks service
 	_ = service.Stop("slipgate-microsocks")
 	_ = service.Remove("slipgate-microsocks")
+
+	// Clean up dnstm if present
+	_, _ = offerDnstmCleanup(out, actions.SystemUninstall)
 
 	// Stop WARP and remove its dedicated users
 	out.Info("Removing WARP...")

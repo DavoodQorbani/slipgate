@@ -139,3 +139,20 @@ func Exists(name string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// ListSlipgateServices returns the names of all slipgate-* service files
+// found in the systemd directory (without the .service suffix).
+func ListSlipgateServices() []string {
+	entries, err := os.ReadDir(systemdDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "slipgate-") && strings.HasSuffix(name, ".service") {
+			names = append(names, strings.TrimSuffix(name, ".service"))
+		}
+	}
+	return names
+}

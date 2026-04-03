@@ -47,6 +47,11 @@ func handleSystemInstall(ctx *actions.Context) error {
 		return actions.NewError(actions.SystemInstall, "no transports selected", nil)
 	}
 
+	// ── Check for existing dnstm installation ─────────────────────
+	if _, err := offerDnstmCleanup(out, actions.SystemInstall); err != nil {
+		return err
+	}
+
 	// ── Step 2: Create system user and directories ─────────────────
 	out.Info("Creating system user 'slipgate'...")
 	if err := system.EnsureUser(); err != nil {

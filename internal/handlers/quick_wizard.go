@@ -169,6 +169,11 @@ func handleQuickWizard(ctx *actions.Context) error {
 	out.Print("")
 	out.Info("Setting up...")
 
+	// Check for existing dnstm installation
+	if _, err := offerDnstmCleanup(out, actions.QuickWizard); err != nil {
+		return err
+	}
+
 	// System user + dirs
 	if err := system.EnsureUser(); err != nil {
 		return actions.NewError(actions.QuickWizard, "failed to create system user", err)

@@ -49,6 +49,11 @@ func RemoveUser() error {
 	return nil
 }
 
+// RemoveSpecificUser removes a system user by name.
+func RemoveSpecificUser(username string) error {
+	return run("userdel", username)
+}
+
 // EnsureDir creates a directory owned by the slipgate user.
 func EnsureDir(path, owner string) error {
 	if err := os.MkdirAll(path, 0750); err != nil {
