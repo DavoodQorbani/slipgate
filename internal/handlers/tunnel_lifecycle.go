@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/anonvector/slipgate/internal/actions"
@@ -54,12 +55,7 @@ func handleTunnelStatus(ctx *actions.Context) error {
 		if tunnel == nil {
 			return actions.NewError(actions.TunnelStatus, fmt.Sprintf("tunnel %q not found", tag), nil)
 		}
-		if err := showTunnelStatus(ctx.Output, tunnel); err != nil {
-			return err
-		}
-		if tunnel.Transport == config.TransportDNSTT {
-			showNoizDNSStatus(ctx.Output, tunnel)
-		}
+		showTunnelDetail(ctx.Output, tunnel)
 		return nil
 	}
 
@@ -88,6 +84,61 @@ func showTunnelStatus(out actions.OutputWriter, tunnel *config.TunnelConfig) err
 	out.Print(fmt.Sprintf("  %-15s %-12s %-8s %-25s %s",
 		tunnel.Tag, tunnel.Transport, tunnel.Backend, tunnel.Domain, status))
 	return nil
+}
+
+func showTunnelDetail(out actions.OutputWriter, tunnel *config.TunnelConfig) {
+	svcName := service.TunnelServiceName(tunnel.Tag)
+	status, err := service.Status(svcName)
+	if err != nil {
+		status = "unknown"
+	}
+
+	out.Print(fmt.Sprintf("  Tag       : %s", tunnel.Tag))
+	out.Print(fmt.Sprintf("  Transport : %s", tunnel.Transport))
+	out.Print(fmt.Sprintf("  Backend   : %s", tunnel.Backend))
+	if tunnel.Domain != "" {
+		out.Print(fmt.Sprintf("  Domain    : %s", tunnel.Domain))
+	}
+	if tunnel.Port > 0 {
+		out.Print(fmt.Sprintf("  Port      : %d", tunnel.Port))
+	}
+	out.Print(fmt.Sprintf("  Status    : %s", status))
+
+	switch tunnel.Transport {
+	case config.TransportDNSTT:
+		if tunnel.DNSTT != nil {
+			out.Print(fmt.Sprintf("  MTU       : %d", tunnel.DNSTT.MTU))
+			out.Print(fmt.Sprintf("  Public Key: %s", tunnel.DNSTT.PublicKey))
+			if privKey := readKeyFile(tunnel.DNSTT.PrivateKey); privKey != "" {
+				out.Print(fmt.Sprintf("  Priv Key  : %s", privKey))
+			}
+		}
+	case config.TransportVayDNS:
+		if tunnel.VayDNS != nil {
+			out.Print(fmt.Sprintf("  MTU       : %d", tunnel.VayDNS.MTU))
+			out.Print(fmt.Sprintf("  Record    : %s", tunnel.VayDNS.RecordType))
+			out.Print(fmt.Sprintf("  Public Key: %s", tunnel.VayDNS.PublicKey))
+			if privKey := readKeyFile(tunnel.VayDNS.PrivateKey); privKey != "" {
+				out.Print(fmt.Sprintf("  Priv Key  : %s", privKey))
+			}
+		}
+	case config.TransportNaive:
+		if tunnel.Naive != nil {
+			out.Print(fmt.Sprintf("  Email     : %s", tunnel.Naive.Email))
+			out.Print(fmt.Sprintf("  Decoy URL : %s", tunnel.Naive.DecoyURL))
+		}
+	}
+}
+
+func readKeyFile(path string) string {
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // showNoizDNSStatus displays the noizdns variant for a DNSTT tunnel.

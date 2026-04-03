@@ -84,6 +84,7 @@ slipgate tunnel remove [tag]    # Remove a tunnel
 slipgate tunnel start [tag]     # Start a tunnel
 slipgate tunnel stop [tag]      # Stop a tunnel
 slipgate tunnel status          # Show all tunnel statuses
+slipgate tunnel status [tag]    # Show tunnel details (keys, MTU, port)
 slipgate tunnel share [tag]     # Generate slipnet:// URI for clients
 slipgate tunnel logs [tag]      # View tunnel logs
 
@@ -182,6 +183,9 @@ sudo slipgate tunnel edit --tag myvaydns \
   --keep-alive 2s \
   --clientid-size 2 \
   --queue-size 512
+
+# View tunnel details (keys, MTU, port, status)
+sudo slipgate tunnel status --tag mydnstt
 
 # Share tunnel config as slipnet:// URI
 sudo slipgate tunnel share mydnstt
