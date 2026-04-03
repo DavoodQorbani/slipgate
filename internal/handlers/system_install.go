@@ -131,10 +131,13 @@ func handleSystemInstall(ctx *actions.Context) error {
 		}
 	}
 
-	// Write default config
-	cfg := config.Default()
-	if err := cfg.Save(); err != nil {
-		return actions.NewError(actions.SystemInstall, "failed to write config", err)
+	// Load existing config or create defaults for fresh install
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Default()
+		if err := cfg.Save(); err != nil {
+			return actions.NewError(actions.SystemInstall, "failed to write config", err)
+		}
 	}
 
 	out.Print("")
@@ -189,7 +192,7 @@ func handleSystemInstall(ctx *actions.Context) error {
 				implicitBackend = config.BackendSOCKS
 			}
 
-			tag := selectedTransport
+			tag := cfg.UniqueTag(selectedTransport)
 			tunnel := config.TunnelConfig{
 				Tag:       tag,
 				Transport: selectedTransport,
@@ -275,10 +278,10 @@ func handleSystemInstall(ctx *actions.Context) error {
 		}
 
 			for bIdx, b := range backends {
-			tag := selectedTransport
+			tag := cfg.UniqueTag(selectedTransport)
 			tunnelDomain := domain
 			if backend == "both" {
-				tag = selectedTransport + "-" + b
+				tag = cfg.UniqueTag(selectedTransport + "-" + b)
 				// SSH backend needs its own subdomain (separate dnstt/slipstream instance)
 				if b == config.BackendSSH && selectedTransport != config.TransportNaive {
 					parentDomain := baseDomain(domain)
@@ -625,6 +628,9 @@ func handleSystemInstall(ctx *actions.Context) error {
 	if len(allTunnels) > 0 && allTunnels[0].DNSTT != nil {
 		out.Print(fmt.Sprintf("    Public Key: %s", allTunnels[0].DNSTT.PublicKey))
 		out.Print(fmt.Sprintf("    MTU       : %d", allTunnels[0].DNSTT.MTU))
+	} else if len(allTunnels) > 0 && allTunnels[0].VayDNS != nil {
+		out.Print(fmt.Sprintf("    Public Key: %s", allTunnels[0].VayDNS.PublicKey))
+		out.Print(fmt.Sprintf("    MTU       : %d", allTunnels[0].VayDNS.MTU))
 	}
 
 	out.Print("")

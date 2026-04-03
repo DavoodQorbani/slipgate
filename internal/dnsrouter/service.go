@@ -9,7 +9,7 @@ import (
 
 const serviceName = "slipgate-dnsrouter"
 
-// CreateRouterService creates the systemd service for the DNS router.
+// CreateRouterService creates and enables the systemd service for the DNS router.
 func CreateRouterService() error {
 	execPath, err := os.Executable()
 	if err != nil {
@@ -26,7 +26,10 @@ func CreateRouterService() error {
 		Restart:     "always",
 	}
 
-	return service.Create(unit)
+	if err := service.Create(unit); err != nil {
+		return err
+	}
+	return service.Start(serviceName)
 }
 
 // StartRouterService starts the DNS router service.
