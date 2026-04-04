@@ -22,7 +22,7 @@ func CreateRouterService() error {
 		ExecStart:   execPath + " dnsrouter serve",
 		User:        "root", // needs to bind port 53
 		Group:       config.SystemGroup,
-		After:       "network.target",
+		After:       "network.target systemd-resolved.service",
 		Restart:     "always",
 	}
 

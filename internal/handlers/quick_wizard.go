@@ -225,9 +225,10 @@ func handleQuickWizard(ctx *actions.Context) error {
 	// ── Create tunnels ─────────────────────────────────────────
 	var allTunnels []config.TunnelConfig
 	needsSOCKS := false
-	var sharedDNSTTKey string
 
 	for _, s := range allSettings {
+		var sharedDNSTTKey string
+		var sharedDNSTTSrcDir string
 		for _, b := range s.backends {
 			tag := cfg.UniqueTag(s.transport)
 			tunnelDomain := s.domain
@@ -288,13 +289,13 @@ func handleQuickWizard(ctx *actions.Context) error {
 						return actions.NewError(actions.QuickWizard, "key generation failed", err)
 					}
 					sharedDNSTTKey = pubKey
+					sharedDNSTTSrcDir = tunnelDir
 					out.Success(fmt.Sprintf("Public key: %s", pubKey))
 				} else {
-					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
-					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+					if err := copyFile(filepath.Join(sharedDNSTTSrcDir, "server.key"), privKeyPath); err != nil {
 						return actions.NewError(actions.QuickWizard, "failed to copy private key", err)
 					}
-					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+					if err := copyFile(filepath.Join(sharedDNSTTSrcDir, "server.pub"), pubKeyPath); err != nil {
 						return actions.NewError(actions.QuickWizard, "failed to copy public key", err)
 					}
 				}
@@ -315,13 +316,13 @@ func handleQuickWizard(ctx *actions.Context) error {
 						return actions.NewError(actions.QuickWizard, "key generation failed", err)
 					}
 					sharedDNSTTKey = pubKey
+					sharedDNSTTSrcDir = tunnelDir
 					out.Success(fmt.Sprintf("Public key: %s", pubKey))
 				} else {
-					srcDir := config.TunnelDir(allTunnels[len(allTunnels)-1].Tag)
-					if err := copyFile(filepath.Join(srcDir, "server.key"), privKeyPath); err != nil {
+					if err := copyFile(filepath.Join(sharedDNSTTSrcDir, "server.key"), privKeyPath); err != nil {
 						return actions.NewError(actions.QuickWizard, "failed to copy private key", err)
 					}
-					if err := copyFile(filepath.Join(srcDir, "server.pub"), pubKeyPath); err != nil {
+					if err := copyFile(filepath.Join(sharedDNSTTSrcDir, "server.pub"), pubKeyPath); err != nil {
 						return actions.NewError(actions.QuickWizard, "failed to copy public key", err)
 					}
 				}

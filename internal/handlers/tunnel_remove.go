@@ -16,7 +16,11 @@ func handleTunnelRemove(ctx *actions.Context) error {
 	tag := ctx.GetArg("tag")
 
 	if tag == "" {
-		return actions.NewError(actions.TunnelRemove, "tunnel tag is required", nil)
+		return actions.NewError(actions.TunnelRemove, "tunnel tag is required (use --all to remove all)", nil)
+	}
+
+	if tag == "--all" {
+		return handleTunnelRemoveAll(ctx, cfg)
 	}
 
 	tunnel := cfg.GetTunnel(tag)
@@ -34,6 +38,51 @@ func handleTunnelRemove(ctx *actions.Context) error {
 		return nil
 	}
 
+	removeSingleTunnel(ctx, cfg, tag)
+
+	if err := cfg.Save(); err != nil {
+		return actions.NewError(actions.TunnelRemove, "failed to save config", err)
+	}
+
+	ctx.Output.Success(fmt.Sprintf("Tunnel %q removed", tag))
+	return nil
+}
+
+func handleTunnelRemoveAll(ctx *actions.Context, cfg *config.Config) error {
+	if len(cfg.Tunnels) == 0 {
+		ctx.Output.Info("No tunnels to remove")
+		return nil
+	}
+
+	ok, err := prompt.Confirm(fmt.Sprintf("Remove ALL %d tunnel(s)? This will stop all services and delete all keys.", len(cfg.Tunnels)))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		ctx.Output.Info("Cancelled")
+		return nil
+	}
+
+	// Collect tags first since we'll be mutating the slice
+	var tags []string
+	for _, t := range cfg.Tunnels {
+		tags = append(tags, t.Tag)
+	}
+
+	for _, tag := range tags {
+		removeSingleTunnel(ctx, cfg, tag)
+		ctx.Output.Success(fmt.Sprintf("Removed %q", tag))
+	}
+
+	if err := cfg.Save(); err != nil {
+		return actions.NewError(actions.TunnelRemove, "failed to save config", err)
+	}
+
+	ctx.Output.Success(fmt.Sprintf("All %d tunnel(s) removed", len(tags)))
+	return nil
+}
+
+func removeSingleTunnel(ctx *actions.Context, cfg *config.Config, tag string) {
 	// Stop and remove service
 	svcName := service.TunnelServiceName(tag)
 	_ = service.Stop(svcName)
@@ -70,11 +119,4 @@ func handleTunnelRemove(ctx *actions.Context) error {
 			ctx.Output.Info("Switched to single-tunnel mode")
 		}
 	}
-
-	if err := cfg.Save(); err != nil {
-		return actions.NewError(actions.TunnelRemove, "failed to save config", err)
-	}
-
-	ctx.Output.Success(fmt.Sprintf("Tunnel %q removed", tag))
-	return nil
 }

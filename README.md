@@ -10,6 +10,7 @@ Unified tunnel manager for Linux servers. Manages DNS tunnels (DNSTT, NoizDNS, S
 - **WARP integration**: Optional Cloudflare WARP outbound routing (see [dnstun-ezpz](https://github.com/aleskxyz/dnstun-ezpz) for an alternative approach)
 - **User management**: Managed SSH + SOCKS credentials per user
 - **Live dashboard**: Real-time TUI with CPU, RAM, traffic sparklines, per-protocol connection stats, and tunnel status
+- **Diagnostics**: Built-in health checks for services, ports, keys, DNS resolution, and boot persistence
 - **Interactive TUI + CLI**: Menu-driven setup or scriptable subcommands
 - **Systemd integration**: Service creation, lifecycle, and logs
 - **Auto-TLS**: Let's Encrypt via Caddy for NaiveProxy tunnels
@@ -76,11 +77,13 @@ slipgate update                 # Self-update and restart all services
 slipgate restart                # Restart all services (DNS router, tunnels, SOCKS)
 slipgate users                  # Manage SSH/SOCKS users and view configs
 slipgate stats                  # Live dashboard (CPU, RAM, traffic, connections, tunnels)
+slipgate diag                   # Run diagnostics (services, ports, keys, DNS, boot status)
 
 # Tunnel management
 slipgate tunnel add             # Add tunnel(s) — supports multi-select and "both" backend
 slipgate tunnel edit [tag]      # Edit tunnel settings (tag, MTU, keys)
 slipgate tunnel remove [tag]    # Remove a tunnel
+slipgate tunnel remove --all    # Remove all tunnels at once
 slipgate tunnel start [tag]     # Start a tunnel
 slipgate tunnel stop [tag]      # Stop a tunnel
 slipgate tunnel status          # Show all tunnel statuses

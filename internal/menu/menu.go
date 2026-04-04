@@ -67,6 +67,11 @@ func Run(cfg *config.Config, cfgErr error) error {
 				printError(err)
 			}
 			waitForEnter()
+		case "diag":
+			if err := runAction(actions.SystemDiag, cfg); err != nil {
+				printError(err)
+			}
+			waitForEnter()
 		case "install":
 			if err := runAction(actions.SystemInstall, cfg); err != nil {
 				printError(err)
@@ -104,9 +109,10 @@ func showMainMenu() (string, error) {
 	fmt.Println("  3) Users")
 	fmt.Println("  4) Stats")
 	fmt.Println("  5) WARP")
-	fmt.Println("  6) Install (advanced)")
-	fmt.Println("  7) Update")
-	fmt.Println("  8) Uninstall")
+	fmt.Println("  6) Diagnostics")
+	fmt.Println("  7) Install (advanced)")
+	fmt.Println("  8) Update")
+	fmt.Println("  9) Uninstall")
 	fmt.Println("  0) Quit")
 	fmt.Print("\n  Choice: ")
 
@@ -126,11 +132,13 @@ func showMainMenu() (string, error) {
 		return "stats", nil
 	case "5", "warp":
 		return "warp", nil
-	case "6", "install":
+	case "6", "diag":
+		return "diag", nil
+	case "7", "install":
 		return "install", nil
-	case "7", "update":
+	case "8", "update":
 		return "update", nil
-	case "8", "uninstall":
+	case "9", "uninstall":
 		return "uninstall", nil
 	case "0", "q", "quit", "exit":
 		return "quit", nil

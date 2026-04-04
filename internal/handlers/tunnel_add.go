@@ -123,6 +123,12 @@ func handleTunnelAdd(ctx *actions.Context) error {
 func addSingleTunnel(ctx *actions.Context, cfg *config.Config, transport_, backend, tag, domain, sharedKeyDir string) error {
 	out := ctx.Output
 
+	// Ensure transport binary is installed (downloads if missing)
+	out.Info("Checking transport binary...")
+	if err := transport.EnsureInstalled(transport_); err != nil {
+		return actions.NewError(actions.TunnelAdd, "transport binary not available", err)
+	}
+
 	tunnel := config.TunnelConfig{
 		Tag:       tag,
 		Transport: transport_,
@@ -334,9 +340,13 @@ func addSingleTunnel(ctx *actions.Context, cfg *config.Config, transport_, backe
 		return actions.NewError(actions.TunnelAdd, "failed to save config", err)
 	}
 
-	// Free the port in case a stale process is holding it
-	if tunnel.IsDNSTunnel() && tunnel.Port > 0 {
-		network.FreePort(tunnel.Port, "udp")
+	// Ensure DNS infrastructure is ready for DNS tunnels
+	if tunnel.IsDNSTunnel() {
+		_ = network.AllowPort(53, "udp")
+		_ = network.DisableResolvedStub()
+		if tunnel.Port > 0 {
+			network.FreePort(tunnel.Port, "udp")
+		}
 	}
 
 	// Create and start systemd service

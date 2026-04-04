@@ -46,6 +46,12 @@ func init() {
 	})
 
 	Register(&Action{
+		ID:       SystemDiag,
+		Name:     "Diagnostics",
+		Category: "system",
+	})
+
+	Register(&Action{
 		ID:       QuickWizard,
 		Name:     "Quick Wizard",
 		Category: "system",
