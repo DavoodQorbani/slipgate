@@ -46,7 +46,18 @@ const (
 	FNoizDNSStealth     = 38 // "0" or "1" (v18)
 	FDNSPayloadSize     = 39 // integer (v18)
 	FSOCKS5ServerPort   = 40 // integer, default 1080 (v18)
-	TotalFields         = 41
+	// v19: VayDNS fields
+	FVayDNSDnsttCompat  = 41
+	FVayDNSRecordType   = 42
+	FVayDNSMaxQnameLen  = 43
+	FVayDNSRps          = 44
+	// v20: VayDNS advanced
+	FVayDNSIdleTimeout  = 45
+	FVayDNSKeepalive    = 46
+	FVayDNSUdpTimeout   = 47
+	FVayDNSMaxNumLabels = 48
+	FVayDNSClientIdSize = 49
+	TotalFields         = 50
 )
 
 // Client modes for DNSTT transport (server is the same, client behavior differs).

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/anonvector/slipgate/internal/config"
 )
@@ -29,7 +30,7 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 	var fields [TotalFields]string
 
 	// Version and type
-	fields[FVersion] = "18"
+	fields[FVersion] = "20"
 	fields[FTunnelType] = GetTunnelType(tunnel.Transport, tunnel.Backend, opts.ClientMode)
 
 	name := tunnel.Tag
@@ -67,6 +68,16 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 	fields[FNoizDNSStealth] = "0"
 	fields[FDNSPayloadSize] = "0"
 	fields[FSOCKS5ServerPort] = "1080"
+	// v19-v20 VayDNS defaults
+	fields[FVayDNSDnsttCompat] = "0"
+	fields[FVayDNSRecordType] = "txt"
+	fields[FVayDNSMaxQnameLen] = "101"
+	fields[FVayDNSRps] = "0"
+	fields[FVayDNSIdleTimeout] = "0"
+	fields[FVayDNSKeepalive] = "0"
+	fields[FVayDNSUdpTimeout] = "0"
+	fields[FVayDNSMaxNumLabels] = "0"
+	fields[FVayDNSClientIdSize] = "0"
 
 	// Transport-specific
 	switch tunnel.Transport {
@@ -78,9 +89,25 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 	case config.TransportVayDNS:
 		if tunnel.VayDNS != nil {
 			fields[FPublicKey] = tunnel.VayDNS.PublicKey
-			if tunnel.VayDNS.RecordType != "" {
-				fields[FDNSTransport] = tunnel.VayDNS.RecordType
+			if tunnel.VayDNS.DnsttCompat {
+				fields[FVayDNSDnsttCompat] = "1"
+			} else {
+				fields[FVayDNSDnsttCompat] = "0"
 			}
+			if tunnel.VayDNS.RecordType != "" {
+				fields[FVayDNSRecordType] = tunnel.VayDNS.RecordType
+			} else {
+				fields[FVayDNSRecordType] = "txt"
+			}
+			fields[FVayDNSMaxQnameLen] = "101"
+			fields[FVayDNSRps] = "0"
+			if tunnel.VayDNS.IdleTimeout != "" {
+				fields[FVayDNSIdleTimeout] = durationToSeconds(tunnel.VayDNS.ResolvedIdleTimeout())
+			}
+			if tunnel.VayDNS.KeepAlive != "" {
+				fields[FVayDNSKeepalive] = durationToSeconds(tunnel.VayDNS.ResolvedKeepAlive())
+			}
+			fields[FVayDNSClientIdSize] = fmt.Sprintf("%d", tunnel.VayDNS.ResolvedClientIDSize())
 		}
 
 	case config.TransportSlipstream:
@@ -135,6 +162,18 @@ func GenerateURI(tunnel *config.TunnelConfig, backend *config.BackendConfig, cfg
 	}
 
 	return Encode(fields), nil
+}
+
+// durationToSeconds converts a Go duration string (e.g. "10s", "2m") to seconds string.
+func durationToSeconds(d string) string {
+	if d == "" {
+		return "0"
+	}
+	dur, err := time.ParseDuration(d)
+	if err != nil {
+		return "0"
+	}
+	return fmt.Sprintf("%d", int(dur.Seconds()))
 }
 
 func getServerIP() string {
